@@ -1,11 +1,17 @@
 #load "module.jai";
 
 main :: () {
-    rawbuf: [4096]u8;
-    buf: []u8 = rawbuf;
-    encoded: []u8;
-    index: s64;
+    context.print_style.default_format_int.base = 16;
+    context.print_style.default_format_int.minimum_digits = 2;
 
+    test_misc();
+    test_encode();
+    test_decode();
+
+    if tests_failed exit(1);
+}
+
+test_misc :: () {
     // Test free functions
     test_eq(tag(.VARINT, 1), 0b1_000);
     test_eq(zigzag(0), 0);
@@ -18,9 +24,22 @@ main :: () {
     test_eq(zigzag(0x7fffffff_ffffffff), 0xffffffff_fffffffe);
     test_eq(zigzag(-0x80000000_00000000), 0xffffffff_ffffffff);
 
+    test_eq(unzigzag(0), 0);
+    test_eq(unzigzag(1), -1);
+    test_eq(unzigzag(2), 1);
+    test_eq(unzigzag(3), -2);
+    test_eq(unzigzag(4), 2);
+    test_eq(unzigzag(0xfffffffe), 0x7fffffff);
+    test_eq(unzigzag(0xffffffff), -0x80000000);
+    test_eq(unzigzag(0xffffffff_fffffffe), 0x7fffffff_ffffffff);
+    test_eq(unzigzag(0xffffffff_ffffffff), -0x80000000_00000000);
+}
 
-    context.print_style.default_format_int.base = 16;
-    context.print_style.default_format_int.minimum_digits = 2;
+test_encode :: () {
+    rawbuf: [4096]u8;
+    buf: []u8 = rawbuf;
+    encoded: []u8;
+    index: s64;
 
     // ----- "A Simple Message" from the docs
     // Test encoded messages
@@ -57,16 +76,82 @@ main :: () {
     index = encode_VARINT(buf, index, 2, 6);
     index = encode_VARINT(buf, index, 1, 6);
     index = encode_string(buf, index, "hello", 4);
-    print("%\n", encode_finish(rawbuf, index));
+    print("Test4: %\n", encode_finish(rawbuf, index));
 
     // My example
     index = buf.count;
     index = encode_VARINT(buf, index, 100, 6);
     index = encode_string(buf, index, "hello", 4);
     index = encode_LEN_from_index(buf, index, submessage_end, 1);
-    print("%\n", encode_finish(buf, index));
+    print("My example: %\n", encode_finish(buf, index));
+}
 
-    if tests_failed exit(1);
+test_decode :: () {
+    buf: []u8;
+    ok: bool;
+    wire_type: WireType;
+    field_number: int;
+    u: u64;
+    s: s64;
+    len: s64;
+    submessage: []u8;
+
+    { // Sample 1
+        buf = .[0x08, 0x96, 0x01];
+        ok, wire_type, field_number = decode_tag(*buf);
+        test_eq(ok, true);
+        test_eq(wire_type, .VARINT);
+        test_eq(field_number, 1);
+
+        ok, u = decode_VARINT(*buf);
+        test_eq(ok, true);
+        test_eq(u, 150);
+    }
+
+    { // Test2
+        buf = .[0x12, 0x07, 0x74, 0x65, 0x73, 0x74, 0x69, 0x6e, 0x67];
+        ok, wire_type, field_number = decode_tag(*buf);
+        test_eq(ok, true);
+        test_eq(wire_type, .LEN);
+        test_eq(field_number, 2);
+
+        ok, len, submessage = decode_LEN(*buf);
+        test_eq(ok, true);
+        test_eq(len, 7);
+        test_eq(submessage, cast([]u8)"testing");
+
+        test_eq(buf.count, 0);
+        ok, wire_type, field_number = decode_tag(*buf);
+        test_eq(ok, false);
+    }
+
+    { // Test3
+        buf = .[0x1a, 0x03, 0x08, 0x96, 0x01];
+        ok, wire_type, field_number = decode_tag(*buf);
+        test_eq(ok, true);
+        test_eq(wire_type, .LEN);
+        test_eq(field_number, 3);
+
+        ok, len, submessage = decode_LEN(*buf);
+        test_eq(ok, true);
+        test_eq(len, 3);
+        test_eq(submessage, u8.[0x08, 0x96, 0x01]);
+        {
+            buf := submessage; @shadow;
+            ok, wire_type, field_number = decode_tag(*buf);
+            test_eq(ok, true);
+            test_eq(wire_type, .VARINT);
+            test_eq(field_number, 1);
+
+            ok, u = decode_VARINT(*buf);
+            test_eq(ok, true);
+            test_eq(u, 150);
+        }
+
+        test_eq(buf.count, 0);
+        ok, wire_type, field_number = decode_tag(*buf);
+        test_eq(ok, false);
+    }
 }
 
 // #run main();

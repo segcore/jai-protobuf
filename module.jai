@@ -3,6 +3,7 @@
  */
 
 #load "encode.jai";
+#load "decode.jai";
 
 LITTLE_ENDIAN :: true;
 
