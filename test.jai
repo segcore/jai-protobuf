@@ -1,4 +1,5 @@
 #load "module.jai";
+#load "proto_parser.jai";
 
 main :: () {
     context.print_style.default_format_int.base = 16;
@@ -7,6 +8,7 @@ main :: () {
     test_misc();
     test_encode();
     test_decode();
+    test_parse();
 
     if tests_failed exit(1);
 }
@@ -151,6 +153,28 @@ test_decode :: () {
         test_eq(buf.count, 0);
         ok, wire_type, field_number = decode_tag(*buf);
         test_eq(ok, false);
+    }
+}
+
+test_parse :: () {
+
+    p: ProtoFile;
+    p = parse_proto(#string END
+syntax = "proto3";
+
+message Test1 {
+    int32 a = 1;
+}
+    END);
+    test_eq(p.edition, "proto3");
+    test_eq(p.definitions.count, 1);
+    if p.definitions.count {
+        test_eq(p.definitions[0].kind, .MESSAGE);
+        test_eq(p.definitions[0].fields.count, 1);
+        test_eq(p.definitions[0].fields[0].type_name, "int32");
+        test_eq(p.definitions[0].fields[0].type, .INT32);
+        test_eq(p.definitions[0].fields[0].name, "a");
+        test_eq(p.definitions[0].fields[0].field_number, 1);
     }
 }
 
