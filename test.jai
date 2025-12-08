@@ -176,6 +176,55 @@ message Test1 {
         test_eq(p.definitions[0].fields[0].name, "a");
         test_eq(p.definitions[0].fields[0].field_number, 1);
     }
+
+    jai_code := generate_jai(p);
+    test_eq(jai_code, #string END
+Test1 :: struct {
+    a: s32;
+}
+    END);
+
+
+    p = parse_proto(#string END
+syntax = "proto3";
+
+enum Corpus {
+    CORPUS_UNSPECIFIED = 0;
+    CORPUS_UNIVERSAL = 1;
+    CORPUS_WEB = 2;
+    CORPUS_IMAGES = 3;
+    CORPUS_LOCAL = 4;
+    CORPUS_NEWS = 5;
+    CORPUS_PRODUCTS = 6;
+    CORPUS_VIDEO = 7;
+}
+
+message SearchRequest {
+    string query = 1;
+    int32 page_number = 2;
+    int32 results_per_page = 3;
+    Corpus corpus = 4;
+}
+    END);
+    jai_code = generate_jai(p);
+    test_eq(jai_code, #string END
+Corpus :: enum {
+    CORPUS_UNSPECIFIED :: 0;
+    CORPUS_UNIVERSAL :: 1;
+    CORPUS_WEB :: 2;
+    CORPUS_IMAGES :: 3;
+    CORPUS_LOCAL :: 4;
+    CORPUS_NEWS :: 5;
+    CORPUS_PRODUCTS :: 6;
+    CORPUS_VIDEO :: 7;
+}
+SearchRequest :: struct {
+    query: string;
+    page_number: s32;
+    results_per_page: s32;
+    corpus: Corpus;
+}
+    END);
 }
 
 // #run main();

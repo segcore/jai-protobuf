@@ -9,6 +9,7 @@ ProtoFile :: struct {
 
 ProtoDefinition :: struct {
     kind : ProtoDefinitionKind;
+    name: string;
     fields : [..]ProtoField;
 }
 
@@ -22,6 +23,7 @@ ProtoField :: struct {
     type_name : string;
     field_number: int;
     name: string;
+    default: string; // Default value
 }
 
 ProtoValue :: union {
@@ -43,6 +45,35 @@ parse_proto :: (data: string) -> ProtoFile {
     return out;
 }
 
+generate_jai :: (p: ProtoFile) -> string {
+    sb: String_Builder;
+
+    for definition : p.definitions {
+        if #complete definition.kind == {
+            case .MESSAGE;
+                print(*sb, "% :: struct {\n", definition.name);
+                for field : definition.fields {
+                    print(*sb, "    %: %", field.name, jai_type(field.type, field.type_name));
+                    if field.default {
+                        print(*sb, " = %", field.default);
+                    }
+                    print(*sb, ";\n");
+                }
+                print(*sb, "}\n");
+            case .ENUM;
+                print(*sb, "% :: enum {\n", definition.name);
+                for field : definition.fields {
+                    print(*sb, "    % :: %;\n", field.name, formatInt(field.field_number, base=10));
+                }
+                print(*sb, "}\n");
+        }
+    }
+
+    return builder_to_string(*sb);
+}
+
+#scope_file
+
 parse_primary :: (p: *Parser, out: *ProtoFile) -> keep_going: bool {
     ok, id := parse(p, TokenKind.ID);
     if !ok {
@@ -63,8 +94,9 @@ parse_primary :: (p: *Parser, out: *ProtoFile) -> keep_going: bool {
             ok=, message_name := parse(p, .ID);
             if !ok return true;
 
-            defn: *ProtoDefinition = array_add(*out.definitions);
-            defn.kind = .MESSAGE;
+            definition: *ProtoDefinition = array_add(*out.definitions);
+            definition.kind = .MESSAGE;
+            definition.name = message_name;
 
             ok = parse(p, .OCURLY);
             if !ok return true;
@@ -76,9 +108,33 @@ parse_primary :: (p: *Parser, out: *ProtoFile) -> keep_going: bool {
                     break;
                 }
                 if t.kind == .ID {
-                    parse_field(p, defn);
+                    parse_field(p, definition);
                 } else {
                     log("Unknown item in message");
+                }
+            }
+            return true;
+        case "enum";
+            ok=, message_name := parse(p, .ID);
+            if !ok return true;
+
+            definition: *ProtoDefinition = array_add(*out.definitions);
+            definition.kind = .ENUM;
+            definition.name = message_name;
+
+            ok = parse(p, .OCURLY);
+            if !ok return true;
+            t: Token;
+            while t.kind != .EOF {
+                t = peek(p);
+                if t.kind == .CCURLY {
+                    next(p);
+                    break;
+                }
+                if t.kind == .ID {
+                    parse_field(p, definition);
+                } else {
+                    log("Unknown item in enum: %", t);
                 }
             }
             return true;
@@ -89,20 +145,15 @@ parse_primary :: (p: *Parser, out: *ProtoFile) -> keep_going: bool {
     return true;
 }
 
-parse_field :: (p: *Parser, defn: *ProtoDefinition) -> ok: bool {
-    field: *ProtoField = array_add(*defn.fields);
+parse_field :: (p: *Parser, definition: *ProtoDefinition) -> ok: bool {
+    field: *ProtoField = array_add(*definition.fields);
 
-    if defn.kind == .MESSAGE {
+    if definition.kind == .MESSAGE {
         ok, type_name := parse(p, .ID);
         if !ok return false;
 
         field.type_name = type_name;
-        if type_name == {
-            case "int32";
-                field.type = .INT32;
-            case;
-                log("TODO: type %", type_name);
-        }
+        field.type = proto_type(type_name);
     }
 
     ok, name := parse(p, .ID);
@@ -134,8 +185,6 @@ parse :: (p: *Parser, kind: TokenKind) -> ok: bool, text: string {
     return true, t.text;
 }
 
-#scope_file
-
 Parser :: struct {
     text: string;
 }
@@ -163,7 +212,6 @@ Token :: struct {
 next :: (p: *Parser) -> Token {
     t := peek(p);
     advance(*p.text, t.text.count);
-    print("next(p) = %\n", t);
     return t;
 }
 
