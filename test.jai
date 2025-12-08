@@ -178,14 +178,14 @@ message Test1 {
     }
 
     jai_code := generate_jai(p);
-    test_eq(jai_code, #string END
+    test_eq(true, contains(jai_code, #string END
 Test1 :: struct {
     a: s32;
 }
-    END);
+    END));
 
 
-    p = parse_proto(#string END
+    CorpusInput :: #string END
 syntax = "proto3";
 
 enum Corpus {
@@ -205,9 +205,10 @@ message SearchRequest {
     int32 results_per_page = 3;
     Corpus corpus = 4;
 }
-    END);
+END
+    p = parse_proto(CorpusInput);
     jai_code = generate_jai(p);
-    test_eq(jai_code, #string END
+    test_eq(true, contains(jai_code, #string END
 Corpus :: enum {
     CORPUS_UNSPECIFIED :: 0;
     CORPUS_UNIVERSAL :: 1;
@@ -218,13 +219,42 @@ Corpus :: enum {
     CORPUS_PRODUCTS :: 6;
     CORPUS_VIDEO :: 7;
 }
+    END));
+    test_eq(true, contains(jai_code, #string END
 SearchRequest :: struct {
     query: string;
     page_number: s32;
     results_per_page: s32;
     corpus: Corpus;
 }
-    END);
+    END));
+
+    PRINT_GENERATED_CODE :: 0;
+
+    if PRINT_GENERATED_CODE {
+        print(jai_code);
+    } else {
+        #insert #run generate_jai(parse_proto(CorpusInput));
+        request: SearchRequest;
+        request.query = "hello";
+        request.page_number = 42;
+        request.results_per_page = 69;
+        request.corpus = .CORPUS_LOCAL;
+
+        as_bytes := Serialize(request);
+        print("Result = %\n", as_bytes);
+
+        decoded: SearchRequest;
+        Parse(*decoded, as_bytes);
+        test_eq(decoded.query, request.query);
+        test_eq(decoded.page_number, request.page_number);
+        test_eq(decoded.results_per_page, request.results_per_page);
+        test_eq(decoded.corpus, request.corpus);
+
+        empty: SearchRequest;
+        as_bytes = Serialize(empty);
+        test_eq(as_bytes, u8.[]);
+    }
 }
 
 // #run main();

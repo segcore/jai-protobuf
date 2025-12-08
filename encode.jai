@@ -47,6 +47,11 @@ encode_VARINT_zigzag :: (buf: []u8, index: s64, value: s64, field_number: int = 
     return encode_VARINT(buf, index, zigzag(value), field_number);
 }
 
+encode_VARINT_nozigzag :: (buf: []u8, index: s64, value: s64, field_number: int = -1) -> index: s64 {
+    as_u64 := cast,no_check(u64) value;
+    return encode_VARINT(buf, index, as_u64, field_number);
+}
+
 encode_VARINT :: (buf: []u8, index: s64, value: u64, field_number: int = -1) -> index: s64 {
     most_significant_bit := bit_scan_reverse(value);
     used := 1 + (most_significant_bit - 1) / 7;

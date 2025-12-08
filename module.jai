@@ -30,6 +30,43 @@ ProtoType :: enum {
     FIXED32; SFIXED32; FLOAT;
 }
 
+wire_type_for :: (proto_type: ProtoType) -> WireType {
+    if #complete proto_type == {
+        case .INT32; #through;
+        case .INT64; #through;
+        case .UINT32; #through;
+        case .UINT64; #through;
+        case .SINT32; #through;
+        case .SINT64; #through;
+        case .BOOL; #through;
+        case .ENUM;
+            return .VARINT;
+        case .FIXED64; #through;
+        case .SFIXED64; #through;
+        case .DOUBLE;
+            return .I64;
+        case .STRING; #through;
+        case .BYTES; #through;
+        case .MESSAGE; #through;
+        case .PACKED_REPEATED;
+            return .LEN;
+        case .FIXED32; #through;
+        case .SFIXED32; #through;
+        case .FLOAT;
+            return .I32;
+    }
+}
+
+should_zigzag :: (proto_type: ProtoType) -> bool {
+    if proto_type == {
+        case .SINT32; #through;
+        case .SINT64;
+            return true;
+        case;
+            return false;
+    }
+}
+
 proto_type :: (type_name: string) -> ProtoType {
     if type_name == {
         case "int32";
@@ -107,4 +144,10 @@ jai_type :: (type: ProtoType, type_name: string) -> string {
         case .PACKED_REPEATED;
             return "int"; // TODO
     }
+}
+
+array_view_equal :: (a: []u8, b: []u8) -> bool {
+    if a.count != b.count return false;
+    equal := memcmp(a.data, b.data, a.count) == 0;
+    return equal;
 }

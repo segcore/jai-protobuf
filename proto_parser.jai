@@ -48,6 +48,8 @@ parse_proto :: (data: string) -> ProtoFile {
 generate_jai :: (p: ProtoFile) -> string {
     sb: String_Builder;
 
+    print(*sb, "// !!! Automatically generated code !!!\n\n");
+
     for definition : p.definitions {
         if #complete definition.kind == {
             case .MESSAGE;
@@ -66,6 +68,144 @@ generate_jai :: (p: ProtoFile) -> string {
                     print(*sb, "    % :: %;\n", field.name, formatInt(field.field_number, base=10));
                 }
                 print(*sb, "}\n");
+        }
+    }
+
+    print(*sb, "\n\n");
+
+    print(*sb, "Serialize :: (message: $T) -> []u8 {\n");
+    print(*sb, "    buf: []u8;\n");
+    print(*sb, "    index := Serialize(buf, 0, message);\n");
+    print(*sb, "    array_resize(*buf, -index, false);\n");
+    print(*sb, "    index = Serialize(buf, buf.count, message);\n");
+    print(*sb, "    assert(index == 0, \"Current index should be 0 but is \%\", index);\n");
+    print(*sb, "    return buf;\n");
+    print(*sb, "}\n\n");
+
+    for definition : p.definitions {
+        if #complete definition.kind == {
+            case .MESSAGE;
+                print(*sb, "Serialize :: (output: []u8, index: s64, message: %, field_number := -1) -> index: s64 {\n", definition.name);
+                print(*sb, "    default: %;\n", definition.name);
+                print(*sb, "    subindex: s64;\n");
+                print(*sb, "    start_index := index;\n");
+
+                // Serialise backwards because the encoder encodes the last bytes first
+                // so it will end up in the normal 'forward' order
+                for < field : definition.fields {
+                    wire_type := wire_type_for(field.type);
+                    if #complete wire_type == {
+                        case .VARINT;
+                            print(*sb, "    if message.%1 != default.%1     ", field.name);
+                            if should_zigzag(field.type) {
+                                print(*sb, "index = encode_VARINT_zigzag(output, index, message.%, %);\n",
+                                    field.name, formatInt(field.field_number));
+                            } else {
+                                print(*sb, "index = encode_VARINT_nozigzag(output, index, message.%, %);\n",
+                                    field.name, formatInt(field.field_number));
+                            }
+                        case .I32;
+                            print(*sb, "    if message.%1 != default.%1     ", field.name);
+                            print(*sb, "index = encode_I32(output, index, message.%, %);\n",
+                                field.name, formatInt(field.field_number));
+                        case .I64;
+                            print(*sb, "    if message.%1 != default.%1     ", field.name);
+                            print(*sb, "index = encode_I64(output, index, message.%, %);\n",
+                                field.name, formatInt(field.field_number));
+                        case .LEN;
+                            if field.type == {
+                                case .STRING;
+                                    print(*sb, "    if message.%1 != default.%1     ", field.name);
+                                    print(*sb, "index = encode_string(output, index, message.%, %);\n",
+                                        field.name, formatInt(field.field_number));
+                                case .BYTES;
+                                    print(*sb, "    if !array_view_equal(message.%1, default.%1)     ", field.name);
+                                    print(*sb, "index = encode_string(output, index, message.%, %);\n",
+                                        field.name, formatInt(field.field_number));
+                                case .MESSAGE;
+                                    print(*sb, "    subindex, index = index, ", field.name);
+                                    print(*sb, "Serialize(output, index, message.%, %);\n", field.name, formatInt(field.field_number));
+                                case;
+                                    log("Unknown LEN field for %", field);
+                            }
+                        case .SGROUP;
+                        case .EGROUP;
+                    }
+                }
+                print(*sb, "    if field_number >= 0 then index = encode_LEN_from_index(output, index, start_index, field_number);\n");
+                print(*sb, "    return index;\n");
+                print(*sb, "}\n\n");
+
+                print(*sb, "Parse :: (message: *%, bytes: []u8) -> bool {\n", definition.name);
+                print(*sb, "    buf := bytes;\n");
+                print(*sb, "    while buf {\n");
+                print(*sb, "        ok, wire_type, field_number := decode_tag(*buf);\n");
+                print(*sb, "        if !ok return false;\n");
+                print(*sb, "        if field_number == {\n");
+                for field : definition.fields {
+                    wire_type := wire_type_for(field.type);
+
+                    print(*sb, "            case %;\n", formatInt(field.field_number));
+                    if field.type == .MESSAGE {
+                        // could be an enum or message, we can call Parse either way
+                        print(*sb, "                ok = Parse(*message.%, *buf);\n", field.name);
+                        print(*sb, "                if !ok return false;\n");
+                        continue;
+                    }
+
+                    print(*sb, "                if wire_type == .% {\n", wire_type);
+                    if #complete wire_type == {
+                        case .VARINT;
+                            if should_zigzag(field.type) {
+                                print(*sb, "                    ok, value = decode_VARINT_zigzag(*buf);\n", field.name);
+                                print(*sb, "                    if !ok return false;\n");
+                                print(*sb, "                    message.% = value;\n", field.name);
+                            } else {
+                                print(*sb, "                    ok, value := decode_VARINT(*buf);\n");
+                                print(*sb, "                    if !ok return false;\n");
+                                print(*sb, "                    message.% = xx,no_check value;\n", field.name);
+                            }
+                        case .I32;
+                            print(*sb, "                    ok, value = decode_I32(*buf);\n", field.name);
+                            print(*sb, "                    if !ok return false;\n");
+                            print(*sb, "                    message.% = value;\n", field.name);
+                        case .I64;
+                            print(*sb, "                    ok, value = decode_I64(*buf);\n", field.name);
+                            print(*sb, "                    if !ok return false;\n");
+                            print(*sb, "                    message.% = value;\n", field.name);
+                        case .LEN;
+                            // Len which is not a message or enum
+                            print(*sb, "                    ok=, _, submessage := decode_LEN(*buf);\n", field.name);
+                            print(*sb, "                    if !ok return false;\n");
+                            if field.type == {
+                                case .STRING;
+                                    print(*sb, "                    message.% = copy_string(submessage.(string));\n", field.name);
+                                case .BYTES;
+                                    print(*sb, "                    message.% = array_copy(submessage);\n", field.name);
+                                case .MESSAGE;
+                                case .PACKED_REPEATED;
+                            }
+                        case .SGROUP;
+                        case .EGROUP;
+                    }
+                    print(*sb, "                }\n");
+                }
+                print(*sb, "        }\n");
+                print(*sb, "    }\n");
+                print(*sb, "    return true;\n");
+                print(*sb, "}\n\n");
+            case .ENUM;
+                print(*sb, "Serialize :: (output: []u8, index: s64, enum_value: %, field_number := -1) -> index: s64 {\n", definition.name);
+                print(*sb, "    value := cast(u64, enum_value);\n");
+                print(*sb, "    if value != 0  index = encode_VARINT(output, index, value, field_number);\n");
+                print(*sb, "    return index;\n");
+                print(*sb, "}\n\n");
+                print(*sb, "Parse :: (enum_value: *%, buf: *[]u8) -> ok: bool {\n", definition.name);
+                print(*sb, "    ok, value := decode_VARINT(buf);\n");
+                print(*sb, "    if !ok return false;\n");
+                print(*sb, "    enum_value.* = xx value;\n");
+                print(*sb, "    return true;\n");
+                print(*sb, "}\n\n");
         }
     }
 
