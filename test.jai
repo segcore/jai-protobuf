@@ -12,6 +12,7 @@ main :: () {
     test_generate();
 
     if tests_failed exit(1);
+    print("All tests passed!\n");
 }
 
 test_misc :: () {
@@ -72,14 +73,6 @@ test_encode :: () {
     // Wrap the message
     index = encode_LEN(buf, index, cast(u64, submessage_end - index), 3);
     test_eq(encode_finish(rawbuf, index), u8.[0x1a, 0x03, 0x08, 0x96, 0x01]);
-
-    // ----- message Test4 - repeated fields
-    index = buf.count;
-    index = encode_VARINT(buf, index, 3, 6);
-    index = encode_VARINT(buf, index, 2, 6);
-    index = encode_VARINT(buf, index, 1, 6);
-    index = encode_string(buf, index, "hello", 4);
-    print("Test4: %\n", encode_finish(rawbuf, index));
 
     // My example
     index = buf.count;
@@ -355,7 +348,6 @@ test_generate :: () {
         request.corpus = .CORPUS_LOCAL;
 
         as_bytes := Serialize(request);
-        print("Result = %\n", as_bytes);
 
         decoded: SearchRequest;
         Parse(*decoded, as_bytes);
@@ -382,8 +374,8 @@ test_generate :: () {
 
         decoded: Point2D;
         Parse(*decoded, as_bytes);
-        test_eq(decoded.x, s32.[1, 2, 3]);
-        test_eq(decoded.y, s32.[9, 8, 7]);
+        test_eq(decoded.x.([]s32), .[1, 2, 3]);
+        test_eq(decoded.y.([]s32), .[9, 8, 7]);
     }
 
     {
@@ -432,7 +424,7 @@ test_generate :: () {
         array_add(*all_types.rep_message, .{0.0}, .{1238.1}, .{-51285.12});
         as_bytes = Serialize(all_types);
 
-        print("Serialized all types = %\n", as_bytes);
+        print("Serialized all types: % bytes %\n", as_bytes.count, as_bytes);
         decoded: AllTypes;
         Parse(*decoded, as_bytes);
 
@@ -487,7 +479,7 @@ equal_bytes :: (a : []u8, b : []u8) -> bool {
     return true;
 }
 
-equal :: (a : [][]$T, b : [][]T) -> bool {
+equal :: (a : []$T, b : []T) -> bool {
     if a.count != b.count return false;
     for i : 0..a.count-1 {
         if !equal(a[i], b[i]) return false;
@@ -495,34 +487,16 @@ equal :: (a : [][]$T, b : [][]T) -> bool {
     return true;
 }
 
-equal :: (a : []$T, b : []T) -> bool
+equal :: (a : $T, b : T) -> bool
     #modify {
         ti := cast(*Type_Info) T;
-        if ti.type == .ARRAY return false;
-        return true;
+        return ti.type != .ARRAY;
     }
 {
-    if a.count != b.count return false;
-    for i : 0..a.count-1 {
-        if a[i] != b[i] return false;
-    }
-    return true;
+    return a == b;
 }
 
-test_eq :: (a: $A, b: A, loc := #caller_location)
-    #modify {
-        ti := cast(*Type_Info) A;
-        if ti.type == .ARRAY return false;
-        return true;
-    }
-{
-    if a != b {
-        tests_failed += 1;
-        log_error("ERROR: %\n   % != \n   %", loc_string(loc), a, b);
-    }
-}
-
-test_eq :: (a: []$T, b: []T, loc := #caller_location) {
+test_eq :: (a: $A, b: A, loc := #caller_location) {
     if !equal(a, b) {
         tests_failed += 1;
         log_error("ERROR: %\n   % != \n   %", loc_string(loc), a, b);

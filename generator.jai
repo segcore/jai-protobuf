@@ -368,7 +368,7 @@ parse_field :: (p: *Parser, definition: *ProtoDefinition) -> ok: bool {
 parse :: (p: *Parser, kind: TokenKind) -> ok: bool, text: string {
     t := peek(p);
     if t.kind != kind {
-        log(" > Expected % but got %", kind, t);
+        if t.kind != .EOF  log(" > Expected % but got %", kind, t);
         return false, "";
     }
     next(p);
