@@ -5,7 +5,7 @@
 decode_tag :: (buf: *[]u8) -> ok: bool, wire_type: WireType, field_number: int {
     ok, value := decode_VARINT(buf);
     wire_type := cast(WireType, value & 0b111);
-    field_number: int = xx (value >> 3);
+    field_number := cast(int, value >> 3);
     return ok, wire_type, field_number;
 }
 
@@ -23,7 +23,7 @@ decode_VARINT :: (buf: *[]u8) -> ok: bool, value: u64 {
     while need_more && index < buf.count {
         next_byte := bufs[index];
         need_more = cast(bool, next_byte & 0x80);
-        databits := next_byte & 0x7F;
+        databits: u64 = next_byte & 0x7F;
         value = value + (databits << shift);
         shift += 7;
         if need_more && shift >= 64 {
@@ -64,7 +64,7 @@ decode_I64 :: (buf: *[]u8) -> ok: bool, value: s64 {
 
 decode_I64_float :: (buf: *[]u8) -> ok: bool, value: float64 {
     ok, value := decode_I64(buf);
-    return ok, value.(*float64).*;
+    return ok, (*value).(*float64).*;
 }
 
 decode_I32 :: (buf: *[]u8) -> ok: bool, value: s32 {
@@ -81,7 +81,7 @@ decode_I32 :: (buf: *[]u8) -> ok: bool, value: s32 {
 }
 decode_I32_float :: (buf: *[]u8) -> ok: bool, value: float32 {
     ok, value := decode_I32(buf);
-    return ok, value.(*float32).*;
+    return ok, (*value).(*float32).*;
 }
 
 unzigzag :: (value: u64) -> s64 {

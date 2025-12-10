@@ -83,10 +83,9 @@ test_encode :: () {
 
     // My example
     index = buf.count;
-    index = encode_VARINT(buf, index, 100, 6);
-    index = encode_string(buf, index, "hello", 4);
-    index = encode_LEN_from_index(buf, index, submessage_end, 1);
-    print("My example: %\n", encode_finish(buf, index));
+    index = encode_VARINT(buf, index, 0, 16);
+    test_eq(encode_finish(buf, index), u8.[0b1000_0000, 0b0000_0001, 0]);
+    
 }
 
 test_decode :: () {
@@ -155,10 +154,51 @@ test_decode :: () {
         ok, wire_type, field_number = decode_tag(*buf);
         test_eq(ok, false);
     }
+
+    {
+        encbuf: [100]u8;
+        decbuf: [100]u8;
+        buf: []u8;
+
+        index := encode_tag(encbuf, encbuf.count, .I64, 1);
+        buf = encode_finish(encbuf, index);
+        ok, wire_type, field_number := decode_tag(*buf);
+        test_eq(ok, true);
+        test_eq(wire_type, .I64);
+        test_eq(field_number, 1);
+
+        index = encode_tag(encbuf, encbuf.count, .I64, 16);
+        buf = encode_finish(encbuf, index);
+        ok, wire_type, field_number = decode_tag(*buf);
+        test_eq(ok, true);
+        test_eq(wire_type, .I64);
+        test_eq(field_number, 16);
+
+        index = encode_tag(encbuf, encbuf.count, .I64, 17);
+        buf = encode_finish(encbuf, index);
+        ok, wire_type, field_number = decode_tag(*buf);
+        test_eq(ok, true);
+        test_eq(wire_type, .I64);
+        test_eq(field_number, 17);
+
+        index = encode_tag(encbuf, encbuf.count, .I64, 100);
+        buf = encode_finish(encbuf, index);
+        ok, wire_type, field_number = decode_tag(*buf);
+        test_eq(ok, true);
+        test_eq(wire_type, .I64);
+        test_eq(field_number, 100);
+
+        index = encode_tag(encbuf, encbuf.count, .I64, 10000);
+        buf = encode_finish(encbuf, index);
+        ok, wire_type, field_number = decode_tag(*buf);
+        test_eq(ok, true);
+        test_eq(wire_type, .I64);
+        test_eq(field_number, 10000);
+    }
 }
 
 
-BasicInput :: #string END
+ProtoBasic1 :: #string END
 syntax = "proto3";
 
 message Test1 {
@@ -167,7 +207,7 @@ message Test1 {
 END
 
 
-CorpusInput :: #string END
+ProtoCorpus :: #string END
 syntax = "proto3";
 
 enum Corpus {
@@ -189,9 +229,65 @@ message SearchRequest {
 }
 END
 
+ProtoRepeated :: #string END
+    syntax = "proto3";
+    message Point2D {
+        repeated int32 x = 1;
+        repeated int32 y = 2;
+    }
+END;
+
+ProtoAllTypes :: #string END
+    syntax = "proto3";
+    enum SomeEnum {
+        ENUM_ZERO = 0;
+        ENUM_ONE = 1;
+    }
+    message SubMessage {
+        float x = 54;
+    }
+    message AllTypes {
+        int32      _i32      = 1;
+        int64      _i64      = 2;
+        uint32     _u32      = 3;
+        uint64     _u64      = 4;
+        bool       _bool     = 5;
+        sint32     _sint32   = 6;
+        sint64     _sint64   = 7;
+        fixed32    _fixed32  = 8;
+        sfixed32   _sfixed32 = 9;
+        float      _float    = 10;
+        fixed64    _fixed64  = 11;
+        sfixed64   _sfixed64 = 12;
+        double     _double   = 13;
+        string     _string   = 14;
+        bytes      _bytes    = 15;
+        SomeEnum   _enum     = 16;
+        SubMessage _message  = 17;
+
+        repeated int32      rep_i32      = 31;
+        repeated int64      rep_i64      = 32;
+        repeated uint32     rep_u32      = 33;
+        repeated uint64     rep_u64      = 34;
+        repeated bool       rep_bool     = 35;
+        repeated sint32     rep_sint32   = 36;
+        repeated sint64     rep_sint64   = 37;
+        repeated fixed32    rep_fixed32  = 38;
+        repeated sfixed32   rep_sfixed32 = 39;
+        repeated float      rep_float    = 40;
+        repeated fixed64    rep_fixed64  = 41;
+        repeated sfixed64   rep_sfixed64 = 42;
+        repeated double     rep_double   = 43;
+        repeated string     rep_string   = 44;
+        repeated bytes      rep_bytes    = 45;
+        repeated SomeEnum   rep_enum     = 46;
+        repeated SubMessage rep_message     = 47;
+    }
+END;
+
 test_parse :: () {
     p: ProtoFile;
-    p = parse_proto(BasicInput);
+    p = parse_proto(ProtoBasic1);
     test_eq(p.edition, "proto3");
     test_eq(p.definitions.count, 1);
     if p.definitions.count {
@@ -210,7 +306,7 @@ Test1 :: struct {
 }
     END));
 
-    p = parse_proto(CorpusInput);
+    p = parse_proto(ProtoCorpus);
     jai_code = generate_jai(p);
     test_eq(true, contains(jai_code, #string END
 Corpus :: enum {
@@ -232,6 +328,16 @@ SearchRequest :: struct {
     corpus: Corpus;
 }
     END));
+
+
+    p = parse_proto(ProtoRepeated);
+    jai_code = generate_jai(p);
+    test_eq(true, contains(jai_code, #string END
+Point2D :: struct {
+    x: [..]s32;
+    y: [..]s32;
+}
+    END));
 }
 
 
@@ -239,8 +345,8 @@ test_generate :: () {
     PRINT_GENERATED_CODE :: 0;
 
     {
-        jai_code :: #run generate_jai(parse_proto(CorpusInput));
-        #if PRINT_GENERATED_CODE print(jai_code);
+        jai_code :: #run generate_jai(parse_proto(ProtoCorpus));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
         #insert jai_code;
         request: SearchRequest;
         request.query = "hello";
@@ -262,6 +368,110 @@ test_generate :: () {
         as_bytes = Serialize(empty);
         test_eq(as_bytes, u8.[]);
     }
+
+    {
+        jai_code :: #run generate_jai(parse_proto(ProtoRepeated));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        #insert jai_code;
+
+        points: Point2D;
+        array_add(*points.x, 1, 2, 3);
+        array_add(*points.y, 9, 8, 7);
+        as_bytes := Serialize(points);
+        test_eq(as_bytes, u8.[0x08, 0x01, 0x08, 0x02, 0x08, 0x03, 0x10, 0x09, 0x10, 0x08, 0x10, 0x07]);
+
+        decoded: Point2D;
+        Parse(*decoded, as_bytes);
+        test_eq(decoded.x, s32.[1, 2, 3]);
+        test_eq(decoded.y, s32.[9, 8, 7]);
+    }
+
+    {
+        jai_code :: #run generate_jai(parse_proto(ProtoAllTypes));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        #insert jai_code;
+
+        all_types: AllTypes;
+        as_bytes := Serialize(all_types);
+        test_eq(as_bytes, u8.[]);
+
+        all_types._i32 = 1;
+        all_types._i64 = 1;
+        all_types._u32 = 1;
+        all_types._u64 = 1;
+        all_types._bool = true;
+        all_types._sint32 = 1;
+        all_types._sint64 = 1;
+        all_types._fixed32 = 1;
+        all_types._sfixed32 = 1;
+        all_types._float = 1;
+        all_types._fixed64 = 1;
+        all_types._sfixed64 = 1;
+        all_types._double = 1;
+        all_types._string = "xxx";
+        all_types._bytes = u8.[1,2,3];
+        all_types._enum = .ENUM_ONE;
+        all_types._message = SubMessage.{8};
+        // Repeated must still encode 0's I guess
+        array_add(*all_types.rep_i32, 0, 1, 2);
+        array_add(*all_types.rep_i64, 0, 1, 2);
+        array_add(*all_types.rep_u32, 0, 1, 2);
+        array_add(*all_types.rep_u64, 0, 1, 2);
+        array_add(*all_types.rep_bool, true, false, true);
+        array_add(*all_types.rep_sint32, 0, 1, 2);
+        array_add(*all_types.rep_sint64, 0, 1, 2);
+        array_add(*all_types.rep_fixed32, 0, 1, 2);
+        array_add(*all_types.rep_sfixed32, 0, 1, 2);
+        array_add(*all_types.rep_float, 0, 1, 2);
+        array_add(*all_types.rep_fixed64, 0, 1, 2);
+        array_add(*all_types.rep_sfixed64, 0, 1, 2);
+        array_add(*all_types.rep_double, 0, 1, 2);
+        array_add(*all_types.rep_string, "", "aaa", "bbbbb");
+        array_add(*all_types.rep_bytes, .[], .[22, 33], .[44, 55, 77]);
+        array_add(*all_types.rep_enum, .ENUM_ONE, .ENUM_ZERO, .ENUM_ONE);
+        array_add(*all_types.rep_message, .{0}, .{1}, .{2});
+        as_bytes = Serialize(all_types);
+
+        print("Serialized all types = %\n", as_bytes);
+        decoded: AllTypes;
+        Parse(*decoded, as_bytes);
+
+        test_eq(decoded._i32, all_types._i32);
+        test_eq(decoded._i64, all_types._i64);
+        test_eq(decoded._u32, all_types._u32);
+        test_eq(decoded._u64, all_types._u64);
+        test_eq(decoded._bool, all_types._bool);
+        test_eq(decoded._sint32, all_types._sint32);
+        test_eq(decoded._sint64, all_types._sint64);
+        test_eq(decoded._fixed32, all_types._fixed32);
+        test_eq(decoded._sfixed32, all_types._sfixed32);
+        test_eq(decoded._float, all_types._float);
+        test_eq(decoded._fixed64, all_types._fixed64);
+        test_eq(decoded._sfixed64, all_types._sfixed64);
+        test_eq(decoded._double, all_types._double);
+        test_eq(decoded._string, all_types._string);
+        test_eq(decoded._bytes, all_types._bytes);
+        test_eq(decoded._enum, all_types._enum);
+        test_eq(decoded._message.x, all_types._message.x);
+        test_eq(decoded.rep_i32, all_types.rep_i32);
+        test_eq(decoded.rep_i64, all_types.rep_i64);
+        test_eq(decoded.rep_u32, all_types.rep_u32);
+        test_eq(decoded.rep_u64, all_types.rep_u64);
+        test_eq(decoded.rep_bool, all_types.rep_bool);
+        test_eq(decoded.rep_sint32, all_types.rep_sint32);
+        test_eq(decoded.rep_sint64, all_types.rep_sint64);
+        test_eq(decoded.rep_fixed32, all_types.rep_fixed32);
+        test_eq(decoded.rep_sfixed32, all_types.rep_sfixed32);
+        test_eq(decoded.rep_float, all_types.rep_float);
+        test_eq(decoded.rep_fixed64, all_types.rep_fixed64);
+        test_eq(decoded.rep_sfixed64, all_types.rep_sfixed64);
+        test_eq(decoded.rep_double, all_types.rep_double);
+        test_eq(decoded.rep_string, all_types.rep_string);
+        test_eq(decoded.rep_bytes, all_types.rep_bytes);
+        test_eq(decoded.rep_enum, all_types.rep_enum);
+        test_eq(decoded.rep_message.count, all_types.rep_message.count);
+        for decoded.rep_message  test_eq(it.x, all_types.rep_message[it_index].x);
+    }
 }
 
 // #run main();
@@ -269,7 +479,29 @@ test_generate :: () {
 
 //// --- Testing ---
 
-equal :: (a : []$T, b : []T) -> bool {
+equal_bytes :: (a : []u8, b : []u8) -> bool {
+    if a.count != b.count return false;
+    for i : 0..a.count-1 {
+        if a[i] != b[i] return false;
+    }
+    return true;
+}
+
+equal :: (a : [][]$T, b : [][]T) -> bool {
+    if a.count != b.count return false;
+    for i : 0..a.count-1 {
+        if !equal(a[i], b[i]) return false;
+    }
+    return true;
+}
+
+equal :: (a : []$T, b : []T) -> bool
+    #modify {
+        ti := cast(*Type_Info) T;
+        if ti.type == .ARRAY return false;
+        return true;
+    }
+{
     if a.count != b.count return false;
     for i : 0..a.count-1 {
         if a[i] != b[i] return false;
