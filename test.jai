@@ -1,5 +1,6 @@
 #load "module.jai";
 #load "generator.jai";
+#import "File";
 
 main :: () {
     context.print_style.default_format_int.base = 16;
@@ -10,6 +11,7 @@ main :: () {
     test_decode();
     test_parse();
     test_generate();
+    test_generate_from_file();
 
     if tests_failed exit(1);
     print("All tests passed!\n");
@@ -355,6 +357,7 @@ test_generate :: () {
         test_eq(decoded.page_number, request.page_number);
         test_eq(decoded.results_per_page, request.results_per_page);
         test_eq(decoded.corpus, request.corpus);
+        FreeContents(*decoded);
 
         empty: SearchRequest;
         as_bytes = Serialize(empty);
@@ -376,6 +379,7 @@ test_generate :: () {
         Parse(*decoded, as_bytes);
         test_eq(decoded.x.([]s32), .[1, 2, 3]);
         test_eq(decoded.y.([]s32), .[9, 8, 7]);
+        FreeContents(*decoded);
     }
 
     {
@@ -463,7 +467,22 @@ test_generate :: () {
         test_eq(decoded.rep_enum, all_types.rep_enum);
         test_eq(decoded.rep_message.count, all_types.rep_message.count);
         for decoded.rep_message  test_eq(it.x, all_types.rep_message[it_index].x);
+        FreeContents(*decoded);
     }
+}
+
+
+test_generate_from_file :: () {
+    input_path :: "protos.proto";
+    output_path :: "generated/protos.jai";
+
+    file_contents := read_entire_file(input_path);
+    resulting_code := generate_jai(parse_proto(file_contents, input_path));
+    make_directory_if_it_does_not_exist("generated");
+    ok := write_entire_file(output_path, resulting_code);
+    test_eq(ok, true);
+    if ok print("Generated %\n", output_path);
+    else  print("Failed to generate %\n", output_path);
 }
 
 // #run main();

@@ -3,6 +3,7 @@
  */
 
 ProtoFile :: struct {
+    source_path: string; // Optional; file path to the original .proto file
     edition: string; // Edition or syntax version. Syntax "proto3" is edition "proto3".
     definitions: [..]ProtoDefinition;
 }
@@ -37,8 +38,9 @@ ProtoValue :: union {
     bytes: []u8;
 }
 
-parse_proto :: (data: string) -> ProtoFile {
+parse_proto :: (data: string, source_path: string = "") -> ProtoFile {
     out: ProtoFile;
+    out.source_path = source_path;
     p: Parser;
     p.text = data;
 
@@ -48,10 +50,45 @@ parse_proto :: (data: string) -> ProtoFile {
     return out;
 }
 
+generate_jai_free_function :: (sb: *String_Builder, definition: ProtoDefinition) {
+    sb2: String_Builder;
+    for field : definition.fields {
+        if field.repeated {
+            if field.type == {
+                case .STRING;
+                    print(*sb2, "    for  message.%  free(it);\n", field.name);
+                case .BYTES;
+                    print(*sb2, "    for  message.%  array_free(it);\n", field.name);
+                case .MESSAGE;
+                    print(*sb2, "    for* message.%  FreeContents(it);\n", field.name);
+            }
+            print(*sb2, "    array_reset(*message.%);\n", field.name);
+        } else {
+            if field.type == {
+                case .STRING;
+                    print(*sb2, "    free(message.%1); message.%1 = \"\";\n", field.name);
+                case .BYTES;
+                    print(*sb2, "    array_reset(*message.%1);\n", field.name);
+                case .MESSAGE;
+                    print(*sb2, "    FreeContents(*message.%);\n", field.name);
+            }
+        }
+    }
+    if builder_string_length(*sb2) == 0 {
+        print(sb, "FreeContents :: inline (message: *%) {}\n", definition.name);
+    } else {
+        print(sb, "FreeContents :: (message: *%) {\n", definition.name);
+        append_and_steal_buffers(sb, *sb2);
+        print(sb, "}\n");
+    }
+}
+
 generate_jai :: (p: ProtoFile) -> string {
     sb: String_Builder;
 
-    print(*sb, "// !!! Automatically generated code !!!\n\n");
+    print(*sb, "// !!! Automatically generated code !!!\n");
+    if p.source_path  print(*sb, "// Generated from %\n", p.source_path);
+    print(*sb, "\n");
 
     for definition : p.definitions {
         if #complete definition.kind == {
@@ -81,6 +118,7 @@ generate_jai :: (p: ProtoFile) -> string {
 
     print(*sb, "\n\n");
 
+    print(*sb, "// Serialize any message type into bytes. Allocates memory.\n");
     print(*sb, "Serialize :: (message: $T) -> []u8 {\n");
     print(*sb, "    buf: []u8;\n");
     print(*sb, "    index := Serialize(buf, 0, message);\n");
@@ -91,9 +129,13 @@ generate_jai :: (p: ProtoFile) -> string {
     print(*sb, "}\n\n");
 
     for definition : p.definitions {
+        print(*sb, "\n");
+        print(*sb, "ProtoType_% :: ProtoType.%;\n", definition.name, definition.kind);
+
+        generate_jai_free_function(*sb, definition);
+
         if #complete definition.kind == {
             case .MESSAGE;
-                print(*sb, "ProtoType_% :: ProtoType.%;\n", definition.name, definition.kind);
                 print(*sb, "Serialize :: (output: []u8, index: s64, message: %, field_number := -1, force := false) -> index: s64 {\n", definition.name);
                 print(*sb, "    default: %;\n", definition.name);
                 print(*sb, "    start_index := index;\n");
@@ -145,7 +187,7 @@ generate_jai :: (p: ProtoFile) -> string {
                 }
                 print(*sb, "    if field_number >= 0 && (force || index != start_index)   index = encode_LEN_from_index(output, index, start_index, field_number);\n");
                 print(*sb, "    return index;\n");
-                print(*sb, "}\n\n");
+                print(*sb, "}\n");
 
                 print(*sb, "Parse :: (message: *%, bytes: []u8) -> ok: bool, used: s64 = 0 {\n", definition.name);
                 print(*sb, "    buf := bytes;\n");
@@ -222,14 +264,13 @@ generate_jai :: (p: ProtoFile) -> string {
                 print(*sb, "    }\n");
                 // Messages always use all of the bytes
                 print(*sb, "    return true, bytes.count;\n");
-                print(*sb, "}\n\n");
+                print(*sb, "}\n");
             case .ENUM;
-                print(*sb, "ProtoType_% :: ProtoType.%;\n", definition.name, definition.kind);
                 print(*sb, "Serialize :: (output: []u8, index: s64, enum_value: %, field_number := -1, force := false) -> index: s64 {\n", definition.name);
                 print(*sb, "    value := cast(u64, enum_value);\n");
                 print(*sb, "    if force || value != 0  index = encode_VARINT(output, index, value, field_number);\n");
                 print(*sb, "    return index;\n");
-                print(*sb, "}\n\n");
+                print(*sb, "}\n");
                 print(*sb, "Parse :: (enum_value: *%, bytes: []u8) -> ok: bool, used: s64 {\n", definition.name);
                 print(*sb, "    buf := bytes;\n");
                 print(*sb, "    ok, value := decode_VARINT(*buf);\n");
@@ -237,7 +278,7 @@ generate_jai :: (p: ProtoFile) -> string {
                 print(*sb, "    enum_value.* = xx,no_check value;\n");
                 print(*sb, "    used := bytes.count - buf.count;\n");
                 print(*sb, "    return true, used;\n");
-                print(*sb, "}\n\n");
+                print(*sb, "}\n");
         }
     }
 
