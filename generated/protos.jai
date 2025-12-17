@@ -58,13 +58,26 @@ Parse :: (message: *Test1, bytes: []u8) -> ok: bool, used: s64 = 0 {
     while buf {
         ok, wire_type, field_number := decode_tag(*buf);
         if !ok return false;
-        if field_number == {
-            case 1;
-                if wire_type == .VARINT {
-                    ok=, value := decode_VARINT(*buf);
-                    if !ok return false;
-                    message.a = xx,no_check value;
-                }
+        if wire_type == {
+        case .VARINT;
+            ok=, decoded_value := decode_VARINT(*buf);  if !ok return false;
+            if field_number == {
+            case 1; message.a = xx,no_check decoded_value;
+            }
+        case .I32;
+            ok=, decoded_value := decode_I32(*buf);  if !ok return false;
+            decoded_value_float := (*decoded_value).(*float32).*;
+            if field_number == {
+            }
+        case .I64;
+            ok=, decoded_value := decode_I64(*buf);  if !ok return false;
+            decoded_value_float := (*decoded_value).(*float64).*;
+            if field_number == {
+            }
+        case .LEN;
+            ok=, _, submessage := decode_LEN(*buf);  if !ok return false;
+            if field_number == {
+            }
         }
     }
     return true, bytes.count;
@@ -91,37 +104,32 @@ Parse :: (message: *Test2, bytes: []u8) -> ok: bool, used: s64 = 0 {
     while buf {
         ok, wire_type, field_number := decode_tag(*buf);
         if !ok return false;
-        if field_number == {
-            case 1;
-                if wire_type == .LEN {
-                    ok=, _, submessage := decode_LEN(*buf);
-                    if !ok return false;
-                    ok=, used := Parse(*message.my_enum, submessage); if !ok return false;
-                } else if wire_type == .VARINT {
-                    ok=, used := Parse(*message.my_enum, buf); if !ok return false;
-                    buf = array_view(buf, used);
-                }
-            case 2;
-                if wire_type == .I32 {
-                    ok=, value := decode_I32_float(*buf);
-                    if !ok return false;
-                    array_add(*message.values, value);
-                }
-            case 3;
-                if wire_type == .VARINT {
-                    ok=, value := decode_VARINT_zigzag(*buf);
-                    if !ok return false;
-                    message.maybe_negative = xx,no_check value;
-                }
-            case 4;
-                if wire_type == .LEN {
-                    ok=, _, submessage := decode_LEN(*buf);
-                    if !ok return false;
-                    ok=, used := Parse(*message.submessage, submessage); if !ok return false;
-                } else if wire_type == .VARINT {
-                    ok=, used := Parse(*message.submessage, buf); if !ok return false;
-                    buf = array_view(buf, used);
-                }
+        if wire_type == {
+        case .VARINT;
+            ok=, decoded_value := decode_VARINT(*buf);  if !ok return false;
+            if field_number == {
+            case 1; #if ProtoType_MyEnum == .ENUM { message.my_enum = xx,no_check decoded_value; }
+            case 3; message.maybe_negative = xx,no_check unzigzag(decoded_value);
+            case 4; #if ProtoType_Test1 == .ENUM { message.submessage = xx,no_check decoded_value; }
+            }
+        case .I32;
+            ok=, decoded_value := decode_I32(*buf);  if !ok return false;
+            decoded_value_float := (*decoded_value).(*float32).*;
+            if field_number == {
+            case 2; array_add(*message.values, decoded_value_float);
+            }
+        case .I64;
+            ok=, decoded_value := decode_I64(*buf);  if !ok return false;
+            decoded_value_float := (*decoded_value).(*float64).*;
+            if field_number == {
+            }
+        case .LEN;
+            ok=, _, submessage := decode_LEN(*buf);  if !ok return false;
+            if field_number == {
+            case 1; if !Parse(*message.my_enum, submessage)  return false;
+            case 2; while submessage {ok=, decoded_value := decode_I32_float(*submessage); if !ok return false; array_add(*message.values, decoded_value); }
+            case 4; if !Parse(*message.submessage, submessage)  return false;
+            }
         }
     }
     return true, bytes.count;

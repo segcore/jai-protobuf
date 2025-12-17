@@ -194,72 +194,99 @@ generate_jai :: (p: ProtoFile) -> string {
                 print(*sb, "    while buf {\n");
                 print(*sb, "        ok, wire_type, field_number := decode_tag(*buf);\n");
                 print(*sb, "        if !ok return false;\n");
-                print(*sb, "        if field_number == {\n");
+                // Switch over wire's type, so we always advance over any unknown fields, and fields with mismatched types
+                print(*sb, "        if wire_type == {\n");
+
+                print(*sb, "        case .VARINT;\n");
+                print(*sb, "            ok=, decoded_value := decode_VARINT(*buf);  if !ok return false;\n");
+                print(*sb, "            if field_number == {\n");
                 for field : definition.fields {
                     wire_type := wire_type_for(field.type);
 
-                    print(*sb, "            case %;\n", formatInt(field.field_number));
-                    // TODO: Primitive types may be PACKED repeated, making .LEN also a valid type for the primitives
-                    print(*sb, "                if wire_type == .% {\n", wire_type);
-                    if #complete wire_type == {
-                        case .VARINT;
-                            if should_zigzag(field.type) {
-                                print(*sb, "                    ok=, value := decode_VARINT_zigzag(*buf);\n", field.name);
-                                print(*sb, "                    if !ok return false;\n");
-                                if field.repeated  print(*sb, "                    array_add(*message.%, xx,no_check value);\n", field.name);
-                                else               print(*sb, "                    message.% = xx,no_check value;\n", field.name);
-                            } else {
-                                print(*sb, "                    ok=, value := decode_VARINT(*buf);\n");
-                                print(*sb, "                    if !ok return false;\n");
-                                if field.repeated  print(*sb, "                    array_add(*message.%, xx,no_check value);\n", field.name);
-                                else               print(*sb, "                    message.% = xx,no_check value;\n", field.name);
-                            }
-                        case .I32;
-                            if field.type == .FLOAT print(*sb, "                    ok=, value := decode_I32_float(*buf);\n", field.name);
-                            else                    print(*sb, "                    ok=, value := decode_I32(*buf);\n", field.name);
-                            print(*sb, "                    if !ok return false;\n");
-                            if field.repeated  print(*sb, "                    array_add(*message.%, value);\n", field.name);
-                            else               print(*sb, "                    message.% = value;\n", field.name);
-                        case .I64;
-                            if field.type == .DOUBLE print(*sb, "                    ok=, value := decode_I64_float(*buf);\n", field.name);
-                            else                     print(*sb, "                    ok=, value := decode_I64(*buf);\n", field.name);
-                            print(*sb, "                    if !ok return false;\n");
-                            if field.repeated  print(*sb, "                    array_add(*message.%, value);\n", field.name);
-                            else               print(*sb, "                    message.% = value;\n", field.name);
-                        case .LEN;
-                            // Len which is not a message or enum
-                            print(*sb, "                    ok=, _, submessage := decode_LEN(*buf);\n", field.name);
-                            print(*sb, "                    if !ok return false;\n");
-                            if field.type == {
-                                case .STRING;
-                                    if field.repeated  print(*sb, "                    array_add(*message.%, copy_string(submessage.(string)));\n", field.name);
-                                    else               print(*sb, "                    message.% = copy_string(submessage.(string));\n", field.name);
-                                case .BYTES;
-                                    if field.repeated  print(*sb, "                    array_add(*message.%, array_copy(submessage));\n", field.name);
-                                    else               print(*sb, "                    message.% = array_copy(submessage);\n", field.name);
-                                case .MESSAGE;
-                                    // Could be a repeated enum, or a Message
-                                    // Messages consume all of the bytes, and repeated enums may not
-                                    if field.repeated {
-                                        print(*sb, "                    ok=, used := Parse(array_add(*message.%), submessage); if !ok return false;\n", field.name);
-                                    } else {
-                                        print(*sb, "                    ok=, used := Parse(*message.%, submessage); if !ok return false;\n", field.name);
-                                    }
-                                    // Not .LEN type, so must be an enum
-                                    print(*sb, "                } else if wire_type == .VARINT {\n");
-                                    if field.repeated {
-                                        print(*sb, "                    ok=, used := Parse(array_add(*message.%), buf); if !ok return false;\n", field.name);
-                                    } else {
-                                        print(*sb, "                    ok=, used := Parse(*message.%, buf); if !ok return false;\n", field.name);
-                                    }
-                                    print(*sb, "                    buf = array_view(buf, used);\n");
-                                case .PACKED_REPEATED;
-                            }
-                        case .SGROUP;
-                        case .EGROUP;
+                    // We have not detected the "real" types of subfields as Message vs Enum, and Message is assumed during parsing.
+                    // So we have some extra logic here to deal with it
+                    maybe_enum := field.type == .MESSAGE;
+                    if wire_type == .VARINT || maybe_enum {
+                        value_string := ifx should_zigzag(field.type) "unzigzag(decoded_value)" else "decoded_value";
+                        print(*sb, "            case %; ", formatInt(field.field_number));
+                        if maybe_enum  print(*sb, "#if ProtoType_% == .ENUM { ", field.type_name);
+                        if field.repeated print(*sb, "array_add(*message.%, xx,no_check %);", field.name, value_string);
+                        else              print(*sb, "message.% = xx,no_check %;",            field.name, value_string);
+                        if maybe_enum  print(*sb, " }");
+                        print(*sb, "\n");
                     }
-                    print(*sb, "                }\n");
                 }
+                print(*sb, "            }\n");
+
+                print(*sb, "        case .I32;\n");
+                print(*sb, "            ok=, decoded_value := decode_I32(*buf);  if !ok return false;\n");
+                print(*sb, "            decoded_value_float := (*decoded_value).(*float32).*;\n");
+                print(*sb, "            if field_number == {\n");
+                for field : definition.fields {
+                    wire_type := wire_type_for(field.type);
+                    if wire_type == .I32 {
+                        value_string := ifx field.type == .FLOAT "decoded_value_float" else "decoded_value";
+                        if field.repeated print(*sb, "            case %; array_add(*message.%, %);\n", formatInt(field.field_number), field.name, value_string);
+                        else              print(*sb, "            case %; message.% = %;\n",            formatInt(field.field_number), field.name, value_string);
+                    }
+                }
+                print(*sb, "            }\n");
+
+                print(*sb, "        case .I64;\n");
+                print(*sb, "            ok=, decoded_value := decode_I64(*buf);  if !ok return false;\n");
+                print(*sb, "            decoded_value_float := (*decoded_value).(*float64).*;\n");
+                print(*sb, "            if field_number == {\n");
+                for field : definition.fields {
+                    wire_type := wire_type_for(field.type);
+                    if wire_type == .I64 {
+                        value_string := ifx field.type == .DOUBLE "decoded_value_float" else "decoded_value";
+                        if field.repeated print(*sb, "            case %; array_add(*message.%, %);\n", formatInt(field.field_number), field.name, value_string);
+                        else              print(*sb, "            case %; message.% = %;\n",            formatInt(field.field_number), field.name, value_string);
+                    }
+                }
+                print(*sb, "            }\n");
+
+                print(*sb, "        case .LEN;\n");
+                print(*sb, "            ok=, _, submessage := decode_LEN(*buf);  if !ok return false;\n");
+                print(*sb, "            if field_number == {\n");
+                for field : definition.fields {
+                    wire_type := wire_type_for(field.type);
+                    if wire_type == .LEN {
+                        print(*sb, "            case %; ", formatInt(field.field_number));
+                        if field.type == {
+                            case .STRING;
+                                if field.repeated  print(*sb, "array_add(*message.%, copy_string(submessage.(string)));\n", field.name);
+                                else               print(*sb, "message.% = copy_string(submessage.(string));\n", field.name);
+                            case .BYTES;
+                                if field.repeated  print(*sb, "array_add(*message.%, array_copy(submessage));\n", field.name);
+                                else               print(*sb, "message.% = array_copy(submessage);\n", field.name);
+                            case .MESSAGE;
+                                // Could be a repeated enum, or a Message
+                                // Messages consume all of the bytes, and repeated enums may not
+                                if field.repeated {
+                                    print(*sb, "while true { ok=, used := Parse(array_add(*message.%), submessage); if !ok return false; submessage = array_view(submessage, used); if !submessage break; }\n", field.name);
+                                } else {
+                                    print(*sb, "if !Parse(*message.%, submessage)  return false;\n", field.name);
+                                }
+                        }
+                    } else if field.repeated && wire_type == .VARINT {
+                        print(*sb, "            case %; while submessage {", formatInt(field.field_number));
+                        print(*sb, "ok=, decoded_value := decode_VARINT(*submessage); if !ok return false;");
+                        value_string := ifx should_zigzag(field.type) "unzigzag(decoded_value)" else "decoded_value";
+                        print(*sb, " array_add(*message.%, xx,no_check %); }\n", field.name, value_string);
+                    } else if field.repeated && wire_type == .I32 {
+                        print(*sb, "            case %; while submessage {", formatInt(field.field_number));
+                        if field.type == .FLOAT print(*sb, "ok=, decoded_value := decode_I32_float(*submessage); if !ok return false;");
+                        else                    print(*sb, "ok=, decoded_value := decode_I32(*submessage); if !ok return false;");
+                        print(*sb, " array_add(*message.%, decoded_value); }\n", field.name);
+                    } else if field.repeated && wire_type == .I64 {
+                        print(*sb, "            case %; while submessage {", formatInt(field.field_number));
+                        if field.type == .DOUBLE print(*sb, "ok=, decoded_value := decode_I64_float(*submessage); if !ok return false;");
+                        else                     print(*sb, "ok=, decoded_value := decode_I64(*submessage); if !ok return false;");
+                        print(*sb, " array_add(*message.%, decoded_value); }\n", field.name);
+                    }
+                }
+                print(*sb, "            }\n");
                 print(*sb, "        }\n");
                 print(*sb, "    }\n");
                 // Messages always use all of the bytes

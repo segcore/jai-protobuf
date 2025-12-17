@@ -276,7 +276,7 @@ ProtoAllTypes :: #string END
         repeated string     rep_string   = 44;
         repeated bytes      rep_bytes    = 45;
         repeated SomeEnum   rep_enum     = 46;
-        repeated SubMessage rep_message     = 47;
+        repeated SubMessage rep_message  = 47;
     }
 END;
 

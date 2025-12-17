@@ -21,9 +21,10 @@ functions for them.
 - [x] Generate Jai structures
 - [x] Generate Jai serializer functions
 - [x] Generate Jai de-serializer functions
-- [ ] Repeated fields
+- [x] Repeated fields
   - [x] Unpacked repeated fields
-  - [ ] Packed repeated fields
+  - [ ] Packed repeated fields - Encode
+  - [x] Packed repeated fields - Decode
 - [ ] Map types
 - [ ] One-of types
 - Field presence is not tracked.
