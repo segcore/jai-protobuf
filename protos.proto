@@ -1,4 +1,5 @@
 syntax = "proto3";
+package foo.bar;
 
 enum MyEnum {
     MyEnum_A = 1;
@@ -13,6 +14,7 @@ message Test1 {
 message Test2 {
     MyEnum my_enum = 1;
     repeated float values = 2;
-    sint32 maybe_negative = 3;
+    sint32 maybe_negative = 3 [default = 42];
     Test1 submessage = 4;
+    string something = 5 [default = "hello", deprecated = true];
 }

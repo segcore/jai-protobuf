@@ -12,8 +12,9 @@ Test1 :: struct {
 Test2 :: struct {
     my_enum: MyEnum;
     values: [..]float32;
-    maybe_negative: s32;
+    maybe_negative: s32 = 42;
     submessage: Test1;
+    something: string = "hello"; @deprecated
 }
 
 
@@ -88,10 +89,12 @@ FreeContents :: (message: *Test2) {
     FreeContents(*message.my_enum);
     array_reset(*message.values);
     FreeContents(*message.submessage);
+    free(message.something); message.something = "";
 }
 Serialize :: (output: []u8, index: s64, message: Test2, field_number := -1, force := false) -> index: s64 {
     default: Test2;
     start_index := index;
+    { it := message.something; if it != default.something     index = encode_string(output, index, it, 5); }
     { it := message.submessage; index = Serialize(output, index, it, 4); }
     { it := message.maybe_negative; if it != default.maybe_negative     index = encode_VARINT_zigzag(output, index, it, 3); }
     for < message.values { index = encode_I32(output, index, it, 2); }
@@ -129,6 +132,7 @@ Parse :: (message: *Test2, bytes: []u8) -> ok: bool, used: s64 = 0 {
             case 1; if !Parse(*message.my_enum, submessage)  return false;
             case 2; while submessage {ok=, decoded_value := decode_I32_float(*submessage); if !ok return false; array_add(*message.values, decoded_value); }
             case 4; if !Parse(*message.submessage, submessage)  return false;
+            case 5; message.something = copy_string(submessage.(string));
             }
         }
     }

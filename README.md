@@ -10,11 +10,12 @@ functions for them.
 - [ ] Parse protobuf description files
   - [x] Basic
   - [ ] Nested messages/enums
-  - [ ] import
-  - [ ] package
-  - [ ] reserved fields
-  - [ ] options
-    - [ ] deprecated, packed, default
+  - [ ] comments
+  - [x] import (ignored)
+  - [x] package (passed to user)
+  - [x] reserved fields (ignored)
+  - [x] options
+    - [x] deprecated, packed, default
     - [ ] extensions
   - [ ] Any type
 - [x] Generate Jai enums

@@ -5,13 +5,16 @@
 ProtoFile :: struct {
     source_path: string; // Optional; file path to the original .proto file
     edition: string; // Edition or syntax version. Syntax "proto3" is edition "proto3".
+    package: string; // Namespacing package, if found
     definitions: [..]ProtoDefinition;
+    options: [..]ProtoOption;
 }
 
 ProtoDefinition :: struct {
     kind : ProtoDefinitionKind;
     name: string;
     fields : [..]ProtoField;
+    options: [..]ProtoOption;
 }
 
 ProtoDefinitionKind :: enum {
@@ -25,9 +28,12 @@ ProtoField :: struct {
     repeated : bool; // 0 or more items
     optional : bool; // metadata
     required : bool; // metadata
+    packed : bool = true; // pack repeated fields
+    deprecated : bool;
     field_number: int;
     name: string;
     default: string; // Default value
+    options: [..]ProtoOption;
 }
 
 ProtoValue :: union {
@@ -36,6 +42,11 @@ ProtoValue :: union {
     floating : float64;
     str: string;
     bytes: []u8;
+}
+
+ProtoOption :: struct {
+    name: string;
+    value: string;
 }
 
 parse_proto :: (data: string, source_path: string = "") -> ProtoFile {
@@ -102,6 +113,7 @@ generate_jai :: (p: ProtoFile) -> string {
                     }
                     if field.default print(*sb, " = %", field.default);
                     print(*sb, ";");
+                    if field.deprecated print(*sb, " @deprecated");
                     if field.optional print(*sb, " @optional");
                     if field.required print(*sb, " @required");
                     print(*sb, "\n");
@@ -330,6 +342,13 @@ parse_primary :: (p: *Parser, out: *ProtoFile) -> keep_going: bool {
             ok = parse(p, TokenKind.SEMICOLON);
             if !ok return true;
             out.edition = str;
+        case "import";
+            ok = parse_import(p);
+        case "option";
+            ok=, option := parse_option(p);
+        case "package";
+            ok=, package := parse_package(p);
+            out.package = package;
         case "message";
             ok=, message_name := parse(p, .ID);
             if !ok return true;
@@ -348,7 +367,11 @@ parse_primary :: (p: *Parser, out: *ProtoFile) -> keep_going: bool {
                     break;
                 }
                 if t.kind == .ID {
-                    parse_field(p, definition);
+                    if t.text == "reserved" {
+                        parse_reserved(p, definition);
+                    } else {
+                        parse_field(p, definition);
+                    }
                 } else {
                     log("Unknown item in message: %", t);
                     next(p);
@@ -386,6 +409,95 @@ parse_primary :: (p: *Parser, out: *ProtoFile) -> keep_going: bool {
 
     return true;
 }
+
+parse_option :: (p: *Parser) -> ok: bool, option: ProtoOption {
+    // "option" already popped
+    t: Token;
+    ok: bool;
+    text: string;
+    option: ProtoOption;
+
+    ok, text = parse(p, .ID);
+    if !ok return false, option;
+    option.name = text;
+
+    ok, text = parse(p, .EQ);
+    if !ok return false, option;
+
+    t = next(p);
+    option.value = ifx t.value then t.value else t.text;
+
+    parse(p, .SEMICOLON);
+    return true, option;
+}
+
+parse_field_option :: (p: *Parser) -> ok:bool, option: ProtoOption {
+    t: Token;
+    option: ProtoOption;
+
+    t = peek(p);
+    if t.kind != .ID return false, option;
+    option.name = t.text;
+    next(p);
+
+    if !parse(p, .EQ) return false, option;
+
+    t = next(p);
+    option.value = t.text;
+
+    t = next(p);
+    if t.kind == .CSQUARE then return true, option;
+    if t.kind == .COMMA then return true, option;
+    log("Unexpected field option token at end of option: %", t);
+    return true, option;
+}
+
+parse_import :: (p: *Parser) -> ok: bool {
+    // Called after "import" is popped
+    t: Token;
+    t = next(p);
+    if t.kind == .ID {
+        if t.text == "public" {
+            t = next(p);
+        }
+        else return false;
+    }
+    if t.kind != .STRING return false;
+    t = next(p);
+    if t.kind != .SEMICOLON return false;
+    return true;
+}
+
+parse_reserved :: (p: *Parser, definition: *ProtoDefinition) -> ok: bool {
+    t: Token;
+    // Skip all
+    while true {
+        t = next(p);
+        if t.kind == {
+        case .SEMICOLON;
+        case .EOF;
+            break;
+        case .NUMBER;
+        case .COMMA;
+        case .STRING;
+        case;
+            log("Unknown token while parsing reserved fields: %", t);
+            return false;
+        }
+    }
+    return true;
+}
+
+parse_package :: (p: *Parser) -> ok: bool, package: string {
+    t: Token;
+
+    ok, text := parse(p, .ID);
+    if !ok return false, "";
+
+    parse(p, .SEMICOLON);
+    return true, text;
+}
+
 
 parse_field :: (p: *Parser, definition: *ProtoDefinition) -> ok: bool {
     field: *ProtoField = array_add(*definition.fields);
@@ -426,6 +538,21 @@ parse_field :: (p: *Parser, definition: *ProtoDefinition) -> ok: bool {
     if !ok return false;
     field.field_number = string_to_int(number_str);
 
+    t := peek(p);
+    if t.kind == .OSQUARE {
+        next(p);
+        while true {
+            subok, option := parse_field_option(p);
+            if !subok break;
+            if option.name == {
+                case "deprecated"; field.deprecated = option.value == "true";
+                case "packed";     field.packed = option.value == "true";
+                case "default";    field.default = option.value;
+                case; array_add(*field.options, option);
+            }
+        }
+    }
+
     ok = parse(p, .SEMICOLON);
     if !ok return false;
 
@@ -444,29 +571,6 @@ parse :: (p: *Parser, kind: TokenKind) -> ok: bool, text: string {
     return true, t.text;
 }
 
-Parser :: struct {
-    text: string;
-}
-
-TokenKind :: enum {
-    UNKNOWN;
-    EOF; // end-of-file (end of string)
-
-    SEMICOLON;
-    OCURLY;
-    CCURLY;
-    EQ;
-
-    ID; // Identifier (name)
-    NUMBER;
-    STRING;
-}
-
-Token :: struct {
-    kind: TokenKind;
-    text: string;
-    value: string;
-}
 
 next :: (p: *Parser) -> Token {
     t := peek(p);
@@ -481,9 +585,12 @@ peek :: (p: *Parser) -> Token {
     t: Token;
     i := 0;
 
-    if is_any(str[i], ";{}=") {
+    if is_any(str[i], ",;{}[]=") {
         t.text = slice(str, 0, 1);
         if str[i] == {
+            case ",";
+                t.kind = .COMMA;
+                return t;
             case ";";
                 t.kind = .SEMICOLON;
                 return t;
@@ -492,6 +599,12 @@ peek :: (p: *Parser) -> Token {
                 return t;
             case "}";
                 t.kind = .CCURLY;
+                return t;
+            case "[";
+                t.kind = .OSQUARE;
+                return t;
+            case "]";
+                t.kind = .CSQUARE;
                 return t;
             case "=";
                 t.kind = .EQ;
@@ -506,7 +619,7 @@ peek :: (p: *Parser) -> Token {
     }
     if i return Token.{kind = .NUMBER, text = slice(str, 0, i)};
 
-    while is_alnum(str[i]) {
+    while is_alnum(str[i]) || str[i] == "." {
         i += 1;
     }
     if i return Token.{kind = .ID, text = slice(str, 0, i)};
@@ -536,6 +649,34 @@ peek :: (p: *Parser) -> Token {
     t.text = slice(str, 0, 1);
 
     return t;
+}
+
+
+Parser :: struct {
+    text: string;
+}
+
+TokenKind :: enum {
+    UNKNOWN;
+    EOF; // end-of-file (end of string)
+
+    SEMICOLON;
+    OCURLY;
+    CCURLY;
+    OSQUARE;
+    CSQUARE;
+    EQ;
+    COMMA; // between reserved field values
+
+    ID; // Identifier (name)
+    NUMBER;
+    STRING;
+}
+
+Token :: struct {
+    kind: TokenKind;
+    text: string;
+    value: string;
 }
 
 #import "String";

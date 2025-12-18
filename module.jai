@@ -24,7 +24,7 @@ ProtoType :: enum {
     FIXED64; SFIXED64; DOUBLE;
 
     // LEN
-    STRING; BYTES; MESSAGE; PACKED_REPEATED;
+    STRING; BYTES; MESSAGE; // PACKED_REPEATED; but this contains a specific type inside
 
     // I32
     FIXED32; SFIXED32; FLOAT;
@@ -47,8 +47,7 @@ wire_type_for :: (proto_type: ProtoType) -> WireType {
             return .I64;
         case .STRING; #through;
         case .BYTES; #through;
-        case .MESSAGE; #through;
-        case .PACKED_REPEATED;
+        case .MESSAGE;
             return .LEN;
         case .FIXED32; #through;
         case .SFIXED32; #through;
@@ -97,8 +96,6 @@ proto_type :: (type_name: string) -> ProtoType {
             return .BYTES;
         case "message";
             return .MESSAGE;
-        case "packed_repeated";
-            return .PACKED_REPEATED;
         case "fixed32";
             return .FIXED32;
         case "sfixed32";
@@ -141,8 +138,6 @@ jai_type :: (type: ProtoType, type_name: string) -> string {
             return type_name;
         case .MESSAGE;
             return type_name;
-        case .PACKED_REPEATED;
-            return "int"; // TODO
     }
 }
 
