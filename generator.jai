@@ -578,8 +578,28 @@ next :: (p: *Parser) -> Token {
     return t;
 }
 
+slice :: (str: string, index: int) -> string {
+    return slice(str, index, str.count - index);
+}
+
 peek :: (p: *Parser) -> Token {
-    p.text = trim_left(p.text);
+    // Eat whitespace and comments
+    while p.text {
+        if is_space(p.text[0]) {
+            advance(*p.text);
+        } else if starts_with(p.text, "//") {
+            found_at := find_index_from_left(p.text, "\n");
+            if found_at == -1 { advance(*p.text, p.text.count); break; }
+            advance(*p.text, found_at + 1);
+        } else if starts_with(p.text, "/*") {
+            found_at := find_index_from_left(p.text, "*/");
+            if found_at == -1 { log("Unterminated comment"); advance(*p.text, p.text.count); break; }
+            advance(*p.text, found_at + 2);
+        } else {
+            break;
+        }
+    }
+
     str := p.text;
     if !str return .{kind = .EOF};
     t: Token;
@@ -680,3 +700,4 @@ Token :: struct {
 }
 
 #import "String";
+#import "Basic";

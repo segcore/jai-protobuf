@@ -10,7 +10,7 @@ functions for them.
 - [ ] Parse protobuf description files
   - [x] Basic
   - [ ] Nested messages/enums
-  - [ ] comments
+  - [x] comments (ignored)
   - [x] import (ignored)
   - [x] package (passed to user)
   - [x] reserved fields (ignored)
