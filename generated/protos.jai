@@ -6,15 +6,25 @@ MyEnum :: enum {
     MyEnum_B :: 2;
     MyEnum_C :: 3;
 }
-Test1 :: struct {
+SimpleHolder :: struct {
     a: s32;
 }
-Test2 :: struct {
+ManyThings :: struct {
     my_enum: MyEnum;
     values: [..]float32;
     maybe_negative: s32 = 42;
     submessage: Test1;
     something: string = "hello"; @deprecated
+    Plant_Kind :: enum {
+        _UNSET;
+        tree;
+        flowers;
+    }
+    Plant_kind: Plant_Kind;
+    using Plant : union {
+        tree: bool;
+        flowers: u32;
+    }
 }
 
 
@@ -45,16 +55,16 @@ Parse :: (enum_value: *MyEnum, bytes: []u8) -> ok: bool, used: s64 {
     return true, used;
 }
 
-ProtoType_Test1 :: ProtoType.MESSAGE;
-FreeContents :: inline (message: *Test1) {}
-Serialize :: (output: []u8, index: s64, message: Test1, field_number := -1, force := false) -> index: s64 {
-    default: Test1;
+ProtoType_SimpleHolder :: ProtoType.MESSAGE;
+FreeContents :: inline (message: *SimpleHolder) {}
+Serialize :: (output: []u8, index: s64, message: SimpleHolder, field_number := -1, force := false) -> index: s64 {
+    default: SimpleHolder;
     start_index := index;
     { it := message.a; if it != default.a     index = encode_VARINT(output, index, xx,no_check it, 1); }
     if field_number >= 0 && (force || index != start_index)   index = encode_LEN_from_index(output, index, start_index, field_number);
     return index;
 }
-Parse :: (message: *Test1, bytes: []u8) -> ok: bool, used: s64 = 0 {
+Parse :: (message: *SimpleHolder, bytes: []u8) -> ok: bool, used: s64 = 0 {
     buf := bytes;
     while buf {
         ok, wire_type, field_number := decode_tag(*buf);
@@ -67,42 +77,38 @@ Parse :: (message: *Test1, bytes: []u8) -> ok: bool, used: s64 = 0 {
             }
         case .I32;
             ok=, decoded_value := decode_I32(*buf);  if !ok return false;
-            decoded_value_float := (*decoded_value).(*float32).*;
-            if field_number == {
-            }
         case .I64;
             ok=, decoded_value := decode_I64(*buf);  if !ok return false;
-            decoded_value_float := (*decoded_value).(*float64).*;
-            if field_number == {
-            }
         case .LEN;
             ok=, _, submessage := decode_LEN(*buf);  if !ok return false;
-            if field_number == {
-            }
         }
     }
     return true, bytes.count;
 }
 
-ProtoType_Test2 :: ProtoType.MESSAGE;
-FreeContents :: (message: *Test2) {
+ProtoType_ManyThings :: ProtoType.MESSAGE;
+FreeContents :: (message: *ManyThings) {
     FreeContents(*message.my_enum);
     array_reset(*message.values);
     FreeContents(*message.submessage);
     free(message.something); message.something = "";
 }
-Serialize :: (output: []u8, index: s64, message: Test2, field_number := -1, force := false) -> index: s64 {
-    default: Test2;
+Serialize :: (output: []u8, index: s64, message: ManyThings, field_number := -1, force := false) -> index: s64 {
+    default: ManyThings;
     start_index := index;
     { it := message.something; if it != default.something     index = encode_string(output, index, it, 5); }
     { it := message.submessage; index = Serialize(output, index, it, 4); }
     { it := message.maybe_negative; if it != default.maybe_negative     index = encode_VARINT_zigzag(output, index, it, 3); }
     for < message.values { index = encode_I32(output, index, it, 2); }
     { it := message.my_enum; index = Serialize(output, index, it, 1); }
+    if message.Plant_kind == {
+        case .tree; { it := message.tree; index = encode_VARINT(output, index, xx,no_check it, 10); }
+        case .flowers; { it := message.flowers; index = encode_VARINT(output, index, xx,no_check it, 11); }
+    }
     if field_number >= 0 && (force || index != start_index)   index = encode_LEN_from_index(output, index, start_index, field_number);
     return index;
 }
-Parse :: (message: *Test2, bytes: []u8) -> ok: bool, used: s64 = 0 {
+Parse :: (message: *ManyThings, bytes: []u8) -> ok: bool, used: s64 = 0 {
     buf := bytes;
     while buf {
         ok, wire_type, field_number := decode_tag(*buf);
@@ -114,6 +120,8 @@ Parse :: (message: *Test2, bytes: []u8) -> ok: bool, used: s64 = 0 {
             case 1; #if ProtoType_MyEnum == .ENUM { message.my_enum = xx,no_check decoded_value; }
             case 3; message.maybe_negative = xx,no_check unzigzag(decoded_value);
             case 4; #if ProtoType_Test1 == .ENUM { message.submessage = xx,no_check decoded_value; }
+            case 10; message.tree = xx,no_check decoded_value; message.Plant_kind = .tree;
+            case 11; message.flowers = xx,no_check decoded_value; message.Plant_kind = .flowers;
             }
         case .I32;
             ok=, decoded_value := decode_I32(*buf);  if !ok return false;
@@ -123,9 +131,6 @@ Parse :: (message: *Test2, bytes: []u8) -> ok: bool, used: s64 = 0 {
             }
         case .I64;
             ok=, decoded_value := decode_I64(*buf);  if !ok return false;
-            decoded_value_float := (*decoded_value).(*float64).*;
-            if field_number == {
-            }
         case .LEN;
             ok=, _, submessage := decode_LEN(*buf);  if !ok return false;
             if field_number == {

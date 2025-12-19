@@ -280,6 +280,16 @@ ProtoAllTypes :: #string END
     }
 END;
 
+ProtoOneOf :: #string END
+message OneOf {
+    int32 x = 1;
+    oneof Plant {
+        bool tree = 2;
+        float twigs = 3;
+    }
+}
+END;
+
 test_parse :: () {
     p: ProtoFile;
     p = parse_proto(ProtoBasic1);
@@ -333,6 +343,70 @@ Point2D :: struct {
     y: [..]s32;
 }
     END));
+
+    p = parse_proto(#string END
+        // With comments
+        /* two kinds
+            message X { int32 x = 1; }
+        */
+        message Y { int32 y = 1; /* int32 z = 2; */ }
+    END);
+    test_eq(p.definitions.count, 1);
+    test_eq(p.definitions[0].name, "Y");
+    test_eq(p.definitions[0].fields.count, 1);
+    test_eq(p.definitions[0].fields[0].name, "y");
+
+    // import, package, reserved, and options
+    p = parse_proto(#string END
+        edition = "2023";
+        import "dir/other.proto";
+        import public "dir/something.proto";
+        package testies.two;
+
+        message Test {
+            float sicles = 69 [default = 1337];
+            float lump = 70 [deprecated = true, default = 0];
+            reserved 42, 100 to 200;
+            reserved "ok", "dude"; // proto3
+            reserved whatever, man; // edition 2023
+        }
+    END);
+    test_eq(p.edition, "2023");
+    test_eq(p.package, "testies.two");
+    test_eq(p.definitions.count, 1);
+    test_eq(p.definitions[0].name, "Test");
+    test_eq(p.definitions[0].fields.count, 2);
+    test_eq(p.definitions[0].fields[0].name, "sicles");
+    test_eq(p.definitions[0].fields[0].default, "1337");
+    test_eq(p.definitions[0].fields[0].deprecated, false);
+    test_eq(p.definitions[0].fields[1].name, "lump");
+    test_eq(p.definitions[0].fields[1].default, "0");
+    test_eq(p.definitions[0].fields[1].deprecated, true);
+
+    // oneof parsing
+    p = parse_proto(#string END
+        message Body {
+            float x = 1;
+            oneof Appendage {
+                int32 arms = 2;
+                int32 legs = 3;
+                float body_girth = 4;
+            }
+            double time = 8;
+        }
+    END);
+    test_eq(p.definitions.count, 1);
+    test_eq(p.definitions[0].name, "Body");
+    test_eq(p.definitions[0].fields.count, 2);
+    test_eq(p.definitions[0].fields[0].name, "x");
+    test_eq(p.definitions[0].fields[1].name, "time");
+    test_eq(p.definitions[0].one_ofs.count, 1);
+    test_eq(p.definitions[0].one_ofs[0].name, "Appendage");
+    test_eq(p.definitions[0].one_ofs[0].fields.count, 3);
+    test_eq(p.definitions[0].one_ofs[0].fields[0].name, "arms");
+    test_eq(p.definitions[0].one_ofs[0].fields[1].name, "legs");
+    test_eq(p.definitions[0].one_ofs[0].fields[2].name, "body_girth");
+    test_eq(p.definitions[0].one_ofs[0].fields[2].type, .FLOAT);
 }
 
 
@@ -467,6 +541,29 @@ test_generate :: () {
         test_eq(decoded.rep_enum, all_types.rep_enum);
         test_eq(decoded.rep_message.count, all_types.rep_message.count);
         for decoded.rep_message  test_eq(it.x, all_types.rep_message[it_index].x);
+        FreeContents(*decoded);
+    }
+
+    {
+        jai_code :: #run generate_jai(parse_proto(ProtoOneOf));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        #insert jai_code;
+
+        message: OneOf;
+        as_bytes := Serialize(message);
+        test_eq(as_bytes, u8.[]);
+
+        message.x = 1234;
+        message.twigs = 1.0;
+        message.Plant_kind = .twigs;
+        as_bytes = Serialize(message);
+
+        decoded: OneOf;
+        Parse(*decoded, as_bytes);
+
+        test_eq(decoded.x, 1234);
+        test_eq(decoded.Plant_kind, .twigs);
+        test_eq(decoded.twigs, 1.0);
         FreeContents(*decoded);
     }
 }

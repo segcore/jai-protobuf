@@ -7,14 +7,19 @@ enum MyEnum {
     MyEnum_C = 3;
 }
 
-message Test1 {
+message SimpleHolder {
     int32 a = 1;
 }
 
-message Test2 {
+message ManyThings {
     MyEnum my_enum = 1;
     repeated float values = 2;
     sint32 maybe_negative = 3 [default = 42];
     Test1 submessage = 4;
     string something = 5 [default = "hello", deprecated = true];
+
+    oneof Plant {
+        bool tree = 10;
+        uint32 flowers = 11;
+    }
 }

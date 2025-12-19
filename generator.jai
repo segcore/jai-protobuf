@@ -15,11 +15,13 @@ ProtoDefinition :: struct {
     name: string;
     fields : [..]ProtoField;
     options: [..]ProtoOption;
+    one_ofs : [..]ProtoDefinition; // "oneof" subtypes
 }
 
 ProtoDefinitionKind :: enum {
     MESSAGE;
     ENUM;
+    ONE_OF;
 }
 
 ProtoField :: struct {
@@ -105,18 +107,12 @@ generate_jai :: (p: ProtoFile) -> string {
         if #complete definition.kind == {
             case .MESSAGE;
                 print(*sb, "% :: struct {\n", definition.name);
-                for field : definition.fields {
-                    if field.repeated {
-                        print(*sb, "    %: [..]%", field.name, jai_type(field.type, field.type_name));
-                    } else {
-                        print(*sb, "    %: %", field.name, jai_type(field.type, field.type_name));
-                    }
-                    if field.default print(*sb, " = %", field.default);
-                    print(*sb, ";");
-                    if field.deprecated print(*sb, " @deprecated");
-                    if field.optional print(*sb, " @optional");
-                    if field.required print(*sb, " @required");
-                    print(*sb, "\n");
+                for definition.fields  generate_jai_field(*sb, it, "    ");
+                for definition.one_ofs {
+                    generate_jai_oneof_enum(*sb, it);
+                    print(*sb, "    using % : union {\n", it.name);
+                    for it.fields  generate_jai_field(*sb, it, "        ");
+                    print(*sb, "    }\n", it.name);
                 }
                 print(*sb, "}\n");
             case .ENUM;
@@ -125,6 +121,7 @@ generate_jai :: (p: ProtoFile) -> string {
                     print(*sb, "    % :: %;\n", field.name, formatInt(field.field_number, base=10));
                 }
                 print(*sb, "}\n");
+            case .ONE_OF;
         }
     }
 
@@ -155,52 +152,23 @@ generate_jai :: (p: ProtoFile) -> string {
                 // Serialise backwards because the encoder encodes the last bytes first
                 // so it will end up in the normal 'forward' order
                 for < field : definition.fields {
-                    wire_type := wire_type_for(field.type);
-
-                    if field.repeated {
-                        print(*sb, "    for < message.% { ", field.name);
-                    } else {
-                        print(*sb, "    { it := message.%; ", field.name);
+                    print(*sb, "    ");
+                    generate_jai_serialize_field(*sb, field, field.repeated, field.required);
+                }
+                for < oneof : definition.one_ofs {
+                    print(*sb, "    if message.%_kind == {\n", oneof.name);
+                    for field : oneof.fields {
+                        print(*sb, "        case .%1; ", field.name);
+                        generate_jai_serialize_field(*sb, field, required=true);
                     }
-
-                    may_omit := !(field.repeated || field.required);
-
-                    if #complete wire_type == {
-                        case .VARINT;
-                            if may_omit print(*sb, "if it != default.%1     ", field.name);
-                            if should_zigzag(field.type) {
-                                print(*sb, "index = encode_VARINT_zigzag(output, index, it, %); }\n", formatInt(field.field_number));
-                            } else {
-                                print(*sb, "index = encode_VARINT(output, index, xx,no_check it, %); }\n", formatInt(field.field_number));
-                            }
-                        case .I32;
-                            if may_omit print(*sb, "if it != default.%1     ", field.name);
-                            print(*sb, "index = encode_I32(output, index, it, %); }\n", formatInt(field.field_number));
-                        case .I64;
-                            if may_omit print(*sb, "if it != default.%1     ", field.name);
-                            print(*sb, "index = encode_I64(output, index, it, %); }\n", formatInt(field.field_number));
-                        case .LEN;
-                            if field.type == {
-                                case .STRING;
-                                    if may_omit print(*sb, "if it != default.%1     ", field.name);
-                                    print(*sb, "index = encode_string(output, index, it, %); }\n", formatInt(field.field_number));
-                                case .BYTES;
-                                    if may_omit print(*sb, "if !array_view_equal(message.%1, default.%1)     ", field.name);
-                                    print(*sb, "index = encode_bytes(output, index, it, %); }\n", formatInt(field.field_number));
-                                case .MESSAGE;
-                                    force := ifx may_omit then "" else ", force=true";
-                                    print(*sb, "index = Serialize(output, index, it, %1%2); }\n", formatInt(field.field_number), force);
-                                case;
-                                    log("Unknown LEN field for %", field);
-                            }
-                        case .SGROUP;
-                        case .EGROUP;
-                    }
+                    print(*sb, "    }\n", oneof.name);
                 }
                 print(*sb, "    if field_number >= 0 && (force || index != start_index)   index = encode_LEN_from_index(output, index, start_index, field_number);\n");
                 print(*sb, "    return index;\n");
                 print(*sb, "}\n");
 
+                sbtmp: String_Builder;
+                changed: bool;
                 print(*sb, "Parse :: (message: *%, bytes: []u8) -> ok: bool, used: s64 = 0 {\n", definition.name);
                 print(*sb, "    buf := bytes;\n");
                 print(*sb, "    while buf {\n");
@@ -209,96 +177,48 @@ generate_jai :: (p: ProtoFile) -> string {
                 // Switch over wire's type, so we always advance over any unknown fields, and fields with mismatched types
                 print(*sb, "        if wire_type == {\n");
 
+                changed = false;
                 print(*sb, "        case .VARINT;\n");
                 print(*sb, "            ok=, decoded_value := decode_VARINT(*buf);  if !ok return false;\n");
-                print(*sb, "            if field_number == {\n");
-                for field : definition.fields {
-                    wire_type := wire_type_for(field.type);
+                print(*sbtmp, "            if field_number == {\n");
+                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, definition, field, .VARINT, field.repeated);
+                for definition.one_ofs  for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, it, field, .VARINT, false);
+                print(*sbtmp, "            }\n");
+                if changed  append_and_steal_buffers(*sb, *sbtmp);
+                reset(*sbtmp);
 
-                    // We have not detected the "real" types of subfields as Message vs Enum, and Message is assumed during parsing.
-                    // So we have some extra logic here to deal with it
-                    maybe_enum := field.type == .MESSAGE;
-                    if wire_type == .VARINT || maybe_enum {
-                        value_string := ifx should_zigzag(field.type) "unzigzag(decoded_value)" else "decoded_value";
-                        print(*sb, "            case %; ", formatInt(field.field_number));
-                        if maybe_enum  print(*sb, "#if ProtoType_% == .ENUM { ", field.type_name);
-                        if field.repeated print(*sb, "array_add(*message.%, xx,no_check %);", field.name, value_string);
-                        else              print(*sb, "message.% = xx,no_check %;",            field.name, value_string);
-                        if maybe_enum  print(*sb, " }");
-                        print(*sb, "\n");
-                    }
-                }
-                print(*sb, "            }\n");
-
+                changed = false;
                 print(*sb, "        case .I32;\n");
                 print(*sb, "            ok=, decoded_value := decode_I32(*buf);  if !ok return false;\n");
-                print(*sb, "            decoded_value_float := (*decoded_value).(*float32).*;\n");
-                print(*sb, "            if field_number == {\n");
-                for field : definition.fields {
-                    wire_type := wire_type_for(field.type);
-                    if wire_type == .I32 {
-                        value_string := ifx field.type == .FLOAT "decoded_value_float" else "decoded_value";
-                        if field.repeated print(*sb, "            case %; array_add(*message.%, %);\n", formatInt(field.field_number), field.name, value_string);
-                        else              print(*sb, "            case %; message.% = %;\n",            formatInt(field.field_number), field.name, value_string);
-                    }
-                }
-                print(*sb, "            }\n");
+                print(*sbtmp, "            decoded_value_float := (*decoded_value).(*float32).*;\n");
+                print(*sbtmp, "            if field_number == {\n");
+                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, definition, field, .I32, field.repeated);
+                for definition.one_ofs  for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, it, field, .I32, false);
+                print(*sbtmp, "            }\n");
+                if changed  append_and_steal_buffers(*sb, *sbtmp);
+                reset(*sbtmp);
 
+                changed = false;
                 print(*sb, "        case .I64;\n");
                 print(*sb, "            ok=, decoded_value := decode_I64(*buf);  if !ok return false;\n");
-                print(*sb, "            decoded_value_float := (*decoded_value).(*float64).*;\n");
-                print(*sb, "            if field_number == {\n");
-                for field : definition.fields {
-                    wire_type := wire_type_for(field.type);
-                    if wire_type == .I64 {
-                        value_string := ifx field.type == .DOUBLE "decoded_value_float" else "decoded_value";
-                        if field.repeated print(*sb, "            case %; array_add(*message.%, %);\n", formatInt(field.field_number), field.name, value_string);
-                        else              print(*sb, "            case %; message.% = %;\n",            formatInt(field.field_number), field.name, value_string);
-                    }
-                }
-                print(*sb, "            }\n");
+                print(*sbtmp, "            decoded_value_float := (*decoded_value).(*float64).*;\n");
+                print(*sbtmp, "            if field_number == {\n");
+                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, definition, field, .I64, field.repeated);
+                for definition.one_ofs  for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, it, field, .I64, false);
+                print(*sbtmp, "            }\n");
+                if changed  append_and_steal_buffers(*sb, *sbtmp);
+                reset(*sbtmp);
 
+                changed = false;
                 print(*sb, "        case .LEN;\n");
                 print(*sb, "            ok=, _, submessage := decode_LEN(*buf);  if !ok return false;\n");
-                print(*sb, "            if field_number == {\n");
-                for field : definition.fields {
-                    wire_type := wire_type_for(field.type);
-                    if wire_type == .LEN {
-                        print(*sb, "            case %; ", formatInt(field.field_number));
-                        if field.type == {
-                            case .STRING;
-                                if field.repeated  print(*sb, "array_add(*message.%, copy_string(submessage.(string)));\n", field.name);
-                                else               print(*sb, "message.% = copy_string(submessage.(string));\n", field.name);
-                            case .BYTES;
-                                if field.repeated  print(*sb, "array_add(*message.%, array_copy(submessage));\n", field.name);
-                                else               print(*sb, "message.% = array_copy(submessage);\n", field.name);
-                            case .MESSAGE;
-                                // Could be a repeated enum, or a Message
-                                // Messages consume all of the bytes, and repeated enums may not
-                                if field.repeated {
-                                    print(*sb, "while true { ok=, used := Parse(array_add(*message.%), submessage); if !ok return false; submessage = array_view(submessage, used); if !submessage break; }\n", field.name);
-                                } else {
-                                    print(*sb, "if !Parse(*message.%, submessage)  return false;\n", field.name);
-                                }
-                        }
-                    } else if field.repeated && wire_type == .VARINT {
-                        print(*sb, "            case %; while submessage {", formatInt(field.field_number));
-                        print(*sb, "ok=, decoded_value := decode_VARINT(*submessage); if !ok return false;");
-                        value_string := ifx should_zigzag(field.type) "unzigzag(decoded_value)" else "decoded_value";
-                        print(*sb, " array_add(*message.%, xx,no_check %); }\n", field.name, value_string);
-                    } else if field.repeated && wire_type == .I32 {
-                        print(*sb, "            case %; while submessage {", formatInt(field.field_number));
-                        if field.type == .FLOAT print(*sb, "ok=, decoded_value := decode_I32_float(*submessage); if !ok return false;");
-                        else                    print(*sb, "ok=, decoded_value := decode_I32(*submessage); if !ok return false;");
-                        print(*sb, " array_add(*message.%, decoded_value); }\n", field.name);
-                    } else if field.repeated && wire_type == .I64 {
-                        print(*sb, "            case %; while submessage {", formatInt(field.field_number));
-                        if field.type == .DOUBLE print(*sb, "ok=, decoded_value := decode_I64_float(*submessage); if !ok return false;");
-                        else                     print(*sb, "ok=, decoded_value := decode_I64(*submessage); if !ok return false;");
-                        print(*sb, " array_add(*message.%, decoded_value); }\n", field.name);
-                    }
-                }
-                print(*sb, "            }\n");
+                print(*sbtmp, "            if field_number == {\n");
+                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, definition, field, .LEN, field.repeated);
+                for definition.one_ofs  for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, it, field, .LEN, false);
+                print(*sbtmp, "            }\n");
+                if changed  append_and_steal_buffers(*sb, *sbtmp);
+                reset(*sbtmp);
+
                 print(*sb, "        }\n");
                 print(*sb, "    }\n");
                 // Messages always use all of the bytes
@@ -318,11 +238,172 @@ generate_jai :: (p: ProtoFile) -> string {
                 print(*sb, "    used := bytes.count - buf.count;\n");
                 print(*sb, "    return true, used;\n");
                 print(*sb, "}\n");
+            case .ONE_OF;
         }
     }
 
     return builder_to_string(*sb);
 }
+
+generate_jai_field :: (sb: *String_Builder, field: ProtoField, indent: string) {
+    if field.repeated {
+        print(sb, "%0%: [..]%", indent, field.name, jai_type(field.type, field.type_name));
+    } else {
+        print(sb, "%0%: %", indent, field.name, jai_type(field.type, field.type_name));
+    }
+    if field.default print(sb, " = %", field.default);
+    print(sb, ";");
+    if field.deprecated print(sb, " @deprecated");
+    if field.optional print(sb, " @optional");
+    if field.required print(sb, " @required");
+    print(sb, "\n");
+}
+
+
+generate_jai_oneof_enum :: (sb: *String_Builder, oneof: ProtoDefinition) {
+    assert(oneof.kind == .ONE_OF);
+
+    print(sb, "    %_Kind :: enum {\n", oneof.name);
+    print(sb, "        _UNSET;\n", oneof.name);
+    for field : oneof.fields {
+        print(sb, "        %;\n", field.name);
+    }
+    print(sb, "    }\n");
+    print(sb, "    %1_kind: %1_Kind;\n", oneof.name);
+}
+
+
+generate_jai_serialize_field :: (sb: *String_Builder, field: ProtoField, repeated: bool = false, required: bool = false) {
+    if repeated {
+        print(sb, "for < message.% { ", field.name);
+    } else {
+        print(sb, "{ it := message.%; ", field.name);
+    }
+
+    may_omit := !(repeated || required);
+
+    if #complete wire_type_for(field.type) == {
+    case .VARINT;
+        if may_omit print(sb, "if it != default.%1     ", field.name);
+        if should_zigzag(field.type) {
+            print(sb, "index = encode_VARINT_zigzag(output, index, it, %); }\n", formatInt(field.field_number));
+        } else {
+            print(sb, "index = encode_VARINT(output, index, xx,no_check it, %); }\n", formatInt(field.field_number));
+        }
+    case .I32;
+        if may_omit print(sb, "if it != default.%1     ", field.name);
+        print(sb, "index = encode_I32(output, index, it, %); }\n", formatInt(field.field_number));
+    case .I64;
+        if may_omit print(sb, "if it != default.%1     ", field.name);
+        print(sb, "index = encode_I64(output, index, it, %); }\n", formatInt(field.field_number));
+    case .LEN;
+        if field.type == {
+        case .STRING;
+            if may_omit print(sb, "if it != default.%1     ", field.name);
+            print(sb, "index = encode_string(output, index, it, %); }\n", formatInt(field.field_number));
+        case .BYTES;
+            if may_omit print(sb, "if !array_view_equal(message.%1, default.%1)     ", field.name);
+            print(sb, "index = encode_bytes(output, index, it, %); }\n", formatInt(field.field_number));
+        case .MESSAGE;
+            force := ifx may_omit then "" else ", force=true";
+            print(sb, "index = Serialize(output, index, it, %1%2); }\n", formatInt(field.field_number), force);
+        case;
+            log("Unknown LEN field for %", field);
+        }
+    case .SGROUP;
+    case .EGROUP;
+    }
+}
+
+generate_jai_parse_field :: (sb: *String_Builder, definition: ProtoDefinition, field: ProtoField, wire_type: WireType, repeated: bool) -> bool {
+    // We have not detected the "real" types of subfields as Message vs Enum, and Message is assumed during parsing.
+    // So we have some extra logic here to deal with it
+    field_type := wire_type_for(field.type);
+    changed: bool = false;
+
+    set_kind :: (sb: *String_Builder, definition: ProtoDefinition, field: ProtoField) {
+        if definition.kind == .ONE_OF {
+            print(sb, " message.%_kind = .%;", definition.name, field.name);
+        }
+    }
+
+    if wire_type == {
+        case .VARINT;
+            maybe_enum := field.type == .MESSAGE;
+            if field_type == .VARINT || maybe_enum {
+                print(sb, "            case %; ", formatInt(field.field_number));
+                if maybe_enum  print(sb, "#if ProtoType_% == .ENUM { ", field.type_name);
+                value_string := ifx should_zigzag(field.type) "unzigzag(decoded_value)" else "decoded_value";
+                if repeated print(sb, "array_add(*message.%, xx,no_check %);", field.name, value_string);
+                else              print(sb, "message.% = xx,no_check %;", field.name, value_string);
+                set_kind(sb, definition, field);
+                if maybe_enum  print(sb, " }");
+                print(sb, "\n");
+                changed = true;
+            }
+        case .I32;
+            if field_type == .I32 {
+                value_string := ifx field.type == .FLOAT "decoded_value_float" else "decoded_value";
+                if repeated print(sb, "            case %; array_add(*message.%, %);", formatInt(field.field_number), field.name, value_string);
+                else              print(sb, "            case %; message.% = %;",            formatInt(field.field_number), field.name, value_string);
+                set_kind(sb, definition, field);
+                print(sb, "\n");
+                changed = true;
+            }
+        case .I64;
+            if field_type == .I64 {
+                value_string := ifx field.type == .DOUBLE "decoded_value_float" else "decoded_value";
+                if repeated print(sb, "            case %; array_add(*message.%, %);", formatInt(field.field_number), field.name, value_string);
+                else              print(sb, "            case %; message.% = %;",            formatInt(field.field_number), field.name, value_string);
+                set_kind(sb, definition, field);
+                print(sb, "\n");
+                changed = true;
+            }
+        case .LEN;
+            if field_type == .LEN {
+                print(sb, "            case %; ", formatInt(field.field_number));
+                if field.type == {
+                    case .STRING;
+                        if repeated  print(sb, "array_add(*message.%, copy_string(submessage.(string)));", field.name);
+                        else               print(sb, "message.% = copy_string(submessage.(string));", field.name);
+                    case .BYTES;
+                        if repeated  print(sb, "array_add(*message.%, array_copy(submessage));", field.name);
+                        else               print(sb, "message.% = array_copy(submessage);", field.name);
+                    case .MESSAGE;
+                        // Could be a repeated enum, or a Message
+                        // Messages consume all of the bytes, and repeated enums may not
+                        if repeated {
+                            print(sb, "while true { ok=, used := Parse(array_add(*message.%), submessage); if !ok return false; submessage = array_view(submessage, used); if !submessage break; }", field.name);
+                        } else {
+                            print(sb, "if !Parse(*message.%, submessage)  return false;", field.name);
+                        }
+                }
+                set_kind(sb, definition, field);
+                print(sb, "\n");
+                changed = true;
+            } else if repeated && field_type == .VARINT {
+                print(sb, "            case %; while submessage {", formatInt(field.field_number));
+                print(sb, "ok=, decoded_value := decode_VARINT(*submessage); if !ok return false;");
+                value_string := ifx should_zigzag(field.type) "unzigzag(decoded_value)" else "decoded_value";
+                print(sb, " array_add(*message.%, xx,no_check %); }\n", field.name, value_string);
+                changed = true;
+            } else if repeated && field_type == .I32 {
+                print(sb, "            case %; while submessage {", formatInt(field.field_number));
+                if field.type == .FLOAT print(sb, "ok=, decoded_value := decode_I32_float(*submessage); if !ok return false;");
+                else                    print(sb, "ok=, decoded_value := decode_I32(*submessage); if !ok return false;");
+                print(sb, " array_add(*message.%, decoded_value); }\n", field.name);
+                changed = true;
+            } else if repeated && field_type == .I64 {
+                print(sb, "            case %; while submessage {", formatInt(field.field_number));
+                if field.type == .DOUBLE print(sb, "ok=, decoded_value := decode_I64_float(*submessage); if !ok return false;");
+                else                     print(sb, "ok=, decoded_value := decode_I64(*submessage); if !ok return false;");
+                print(sb, " array_add(*message.%, decoded_value); }\n", field.name);
+                changed = true;
+            }
+    }
+    return changed;
+}
+
 
 #scope_file
 
@@ -334,7 +415,8 @@ parse_primary :: (p: *Parser, out: *ProtoFile) -> keep_going: bool {
     }
 
     if id == {
-        case "syntax";
+        case "syntax"; #through;
+        case "edition";
             ok = parse(p, TokenKind.EQ);
             if !ok return true;
             ok=, str := parse(p, TokenKind.STRING);
@@ -359,24 +441,8 @@ parse_primary :: (p: *Parser, out: *ProtoFile) -> keep_going: bool {
 
             ok = parse(p, .OCURLY);
             if !ok return true;
-            t: Token;
-            while t.kind != .EOF {
-                t = peek(p);
-                if t.kind == .CCURLY {
-                    next(p);
-                    break;
-                }
-                if t.kind == .ID {
-                    if t.text == "reserved" {
-                        parse_reserved(p, definition);
-                    } else {
-                        parse_field(p, definition);
-                    }
-                } else {
-                    log("Unknown item in message: %", t);
-                    next(p);
-                }
-            }
+
+            parse_message_fields(p, definition);
             return true;
         case "enum";
             ok=, message_name := parse(p, .ID);
@@ -469,22 +535,68 @@ parse_import :: (p: *Parser) -> ok: bool {
 }
 
 parse_reserved :: (p: *Parser, definition: *ProtoDefinition) -> ok: bool {
+    next(p); // The reserved word
     t: Token;
     // Skip all
     while true {
         t = next(p);
         if t.kind == {
-        case .SEMICOLON;
-        case .EOF;
-            break;
+        case .SEMICOLON; break;
+        case .EOF; break;
         case .NUMBER;
         case .COMMA;
         case .STRING;
+        case .ID; // Can be "1 to 200", and in editions plain "reserved foo;"
         case;
             log("Unknown token while parsing reserved fields: %", t);
             return false;
         }
     }
+    return true;
+}
+
+parse_message_fields :: (p: *Parser, definition: *ProtoDefinition) -> ok: bool {
+    t: Token;
+    while true {
+        t = peek(p);
+        if t.kind == .EOF return false;
+        if t.kind == .CCURLY {
+            next(p);
+            break;
+        }
+        if t.kind == .ID {
+            if t.text == {
+            case "reserved"; parse_reserved(p, definition);
+            case "oneof";    parse_oneof(p, definition);
+            case;
+                parse_field(p, definition);
+            }
+        } else {
+            log("Unknown item when looking for a message field: %", t);
+            next(p);
+        }
+    }
+    return true;
+}
+
+parse_oneof :: (p: *Parser, definition: *ProtoDefinition) -> ok: bool {
+    next(p); // skip "oneof"
+    t: Token;
+    ok, text := parse(p, .ID);
+    if !ok return false;
+
+    item: ProtoDefinition;
+    item.kind = .ONE_OF;
+    item.name = text;
+
+    ok, text = parse(p, .OCURLY);
+    if !ok return false;
+
+    ok = parse_message_fields(p, *item);
+    if !ok return false;
+
+    array_add(*definition.one_ofs, item);
+
     return true;
 }
 
@@ -519,7 +631,7 @@ parse_field :: (p: *Parser, definition: *ProtoDefinition) -> ok: bool {
         }
     }
 
-    if definition.kind == .MESSAGE {
+    if definition.kind != .ENUM {
         ok, type_name := parse(p, .ID);
         if !ok return false;
 
