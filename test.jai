@@ -407,6 +407,31 @@ Point2D :: struct {
     test_eq(p.definitions[0].one_ofs[0].fields[1].name, "legs");
     test_eq(p.definitions[0].one_ofs[0].fields[2].name, "body_girth");
     test_eq(p.definitions[0].one_ofs[0].fields[2].type, .FLOAT);
+
+    // Nested Enum parsing
+    p = parse_proto(#string END
+        message M {
+            int32 x = 1;
+
+            enum E {
+                v0 = 0;
+                v1 = 1;
+            }
+
+            E v = 2;
+        }
+    END);
+    test_eq(p.definitions.count, 1);
+    test_eq(p.definitions[0].name, "M");
+    test_eq(p.definitions[0].fields.count, 2);
+    test_eq(p.definitions[0].fields[0].name, "x");
+    test_eq(p.definitions[0].fields[1].name, "v");
+    test_eq(p.definitions[0].subtypes.count, 1);
+    test_eq(p.definitions[0].subtypes[0].name, "E");
+    test_eq(p.definitions[0].subtypes[0].kind, .ENUM);
+    test_eq(p.definitions[0].subtypes[0].fields.count, 2);
+    test_eq(p.definitions[0].subtypes[0].fields[0].name, "v0");
+    test_eq(p.definitions[0].subtypes[0].fields[1].name, "v1");
 }
 
 
@@ -416,155 +441,198 @@ test_generate :: () {
     {
         jai_code :: #run generate_jai(parse_proto(ProtoCorpus));
         #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
-        #insert jai_code;
-        request: SearchRequest;
-        request.query = "hello";
-        request.page_number = 42;
-        request.results_per_page = 69;
-        request.corpus = .CORPUS_LOCAL;
+        else {
+            #insert jai_code;
+            request: SearchRequest;
+            request.query = "hello";
+            request.page_number = 42;
+            request.results_per_page = 69;
+            request.corpus = .CORPUS_LOCAL;
 
-        as_bytes := Serialize(request);
+            as_bytes := Serialize(request);
 
-        decoded: SearchRequest;
-        Parse(*decoded, as_bytes);
-        test_eq(decoded.query, request.query);
-        test_eq(decoded.page_number, request.page_number);
-        test_eq(decoded.results_per_page, request.results_per_page);
-        test_eq(decoded.corpus, request.corpus);
-        FreeContents(*decoded);
+            decoded: SearchRequest;
+            Parse(*decoded, as_bytes);
+            test_eq(decoded.query, request.query);
+            test_eq(decoded.page_number, request.page_number);
+            test_eq(decoded.results_per_page, request.results_per_page);
+            test_eq(decoded.corpus, request.corpus);
+            FreeContents(*decoded);
 
-        empty: SearchRequest;
-        as_bytes = Serialize(empty);
-        test_eq(as_bytes, u8.[]);
+            empty: SearchRequest;
+            as_bytes = Serialize(empty);
+            test_eq(as_bytes, u8.[]);
+        }
     }
 
     {
         jai_code :: #run generate_jai(parse_proto(ProtoRepeated));
         #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
-        #insert jai_code;
+        else {
+            #insert jai_code;
 
-        points: Point2D;
-        array_add(*points.x, 1, 2, 3);
-        array_add(*points.y, 9, 8, 7);
-        as_bytes := Serialize(points);
-        test_eq(as_bytes, u8.[0x08, 0x01, 0x08, 0x02, 0x08, 0x03, 0x10, 0x09, 0x10, 0x08, 0x10, 0x07]);
+            points: Point2D;
+            array_add(*points.x, 1, 2, 3);
+            array_add(*points.y, 9, 8, 7);
+            as_bytes := Serialize(points);
+            test_eq(as_bytes, u8.[0x08, 0x01, 0x08, 0x02, 0x08, 0x03, 0x10, 0x09, 0x10, 0x08, 0x10, 0x07]);
 
-        decoded: Point2D;
-        Parse(*decoded, as_bytes);
-        test_eq(decoded.x.([]s32), .[1, 2, 3]);
-        test_eq(decoded.y.([]s32), .[9, 8, 7]);
-        FreeContents(*decoded);
+            decoded: Point2D;
+            Parse(*decoded, as_bytes);
+            test_eq(decoded.x.([]s32), .[1, 2, 3]);
+            test_eq(decoded.y.([]s32), .[9, 8, 7]);
+            FreeContents(*decoded);
+        }
     }
 
     {
         jai_code :: #run generate_jai(parse_proto(ProtoAllTypes));
         #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
-        #insert jai_code;
+        else {
+            #insert jai_code;
 
-        all_types: AllTypes;
-        as_bytes := Serialize(all_types);
-        test_eq(as_bytes, u8.[]);
+            all_types: AllTypes;
+            as_bytes := Serialize(all_types);
+            test_eq(as_bytes, u8.[]);
 
-        all_types._i32 = 99999;
-        all_types._i64 = 99999;
-        all_types._u32 = 99999;
-        all_types._u64 = 99999;
-        all_types._bool = true;
-        all_types._sint32 = -99999;
-        all_types._sint64 = -99999;
-        all_types._fixed32 = -99999;
-        all_types._sfixed32 = -99999;
-        all_types._float = -99999;
-        all_types._fixed64 = -99999;
-        all_types._sfixed64 = -99999;
-        all_types._double = -99999;
-        all_types._string = "xxx";
-        all_types._bytes = u8.[1,50,255];
-        all_types._enum = .ENUM_ONE;
-        all_types._message = SubMessage.{-1234.5};
-        // Repeated must still encode 0s
-        array_add(*all_types.rep_i32, 0, 1, -88888);
-        array_add(*all_types.rep_i64, 0, 1, -88888);
-        array_add(*all_types.rep_u32, 0, 1, 88888);
-        array_add(*all_types.rep_u64, 0, 1, 88888);
-        array_add(*all_types.rep_bool, true, false, true);
-        array_add(*all_types.rep_sint32, 0, 1, -88888);
-        array_add(*all_types.rep_sint64, 0, 1, -88888);
-        array_add(*all_types.rep_fixed32, 0, 1, -88888);
-        array_add(*all_types.rep_sfixed32, 0, 1, -88888);
-        array_add(*all_types.rep_float, 0, 1, -88888);
-        array_add(*all_types.rep_fixed64, 0, 1, -88888);
-        array_add(*all_types.rep_sfixed64, 0, 1, -88888);
-        array_add(*all_types.rep_double, 0, 1, -88888);
-        array_add(*all_types.rep_string, "", "aaa", "bbbbb");
-        array_add(*all_types.rep_bytes, .[], .[22, 0], .[44, 255, 77]);
-        array_add(*all_types.rep_enum, .ENUM_ONE, .ENUM_ZERO, .ENUM_ONE);
-        array_add(*all_types.rep_message, .{0.0}, .{1238.1}, .{-51285.12});
-        as_bytes = Serialize(all_types);
+            all_types._i32 = 99999;
+            all_types._i64 = 99999;
+            all_types._u32 = 99999;
+            all_types._u64 = 99999;
+            all_types._bool = true;
+            all_types._sint32 = -99999;
+            all_types._sint64 = -99999;
+            all_types._fixed32 = -99999;
+            all_types._sfixed32 = -99999;
+            all_types._float = -99999;
+            all_types._fixed64 = -99999;
+            all_types._sfixed64 = -99999;
+            all_types._double = -99999;
+            all_types._string = "xxx";
+            all_types._bytes = u8.[1,50,255];
+            all_types._enum = .ENUM_ONE;
+            all_types._message = SubMessage.{-1234.5};
+            // Repeated must still encode 0s
+            array_add(*all_types.rep_i32, 0, 1, -88888);
+            array_add(*all_types.rep_i64, 0, 1, -88888);
+            array_add(*all_types.rep_u32, 0, 1, 88888);
+            array_add(*all_types.rep_u64, 0, 1, 88888);
+            array_add(*all_types.rep_bool, true, false, true);
+            array_add(*all_types.rep_sint32, 0, 1, -88888);
+            array_add(*all_types.rep_sint64, 0, 1, -88888);
+            array_add(*all_types.rep_fixed32, 0, 1, -88888);
+            array_add(*all_types.rep_sfixed32, 0, 1, -88888);
+            array_add(*all_types.rep_float, 0, 1, -88888);
+            array_add(*all_types.rep_fixed64, 0, 1, -88888);
+            array_add(*all_types.rep_sfixed64, 0, 1, -88888);
+            array_add(*all_types.rep_double, 0, 1, -88888);
+            array_add(*all_types.rep_string, "", "aaa", "bbbbb");
+            array_add(*all_types.rep_bytes, .[], .[22, 0], .[44, 255, 77]);
+            array_add(*all_types.rep_enum, .ENUM_ONE, .ENUM_ZERO, .ENUM_ONE);
+            array_add(*all_types.rep_message, .{0.0}, .{1238.1}, .{-51285.12});
+            as_bytes = Serialize(all_types);
 
-        print("Serialized all types: % bytes %\n", as_bytes.count, as_bytes);
-        decoded: AllTypes;
-        Parse(*decoded, as_bytes);
+            print("Serialized all types: % bytes %\n", as_bytes.count, as_bytes);
+            decoded: AllTypes;
+            Parse(*decoded, as_bytes);
 
-        test_eq(decoded._i32, all_types._i32);
-        test_eq(decoded._i64, all_types._i64);
-        test_eq(decoded._u32, all_types._u32);
-        test_eq(decoded._u64, all_types._u64);
-        test_eq(decoded._bool, all_types._bool);
-        test_eq(decoded._sint32, all_types._sint32);
-        test_eq(decoded._sint64, all_types._sint64);
-        test_eq(decoded._fixed32, all_types._fixed32);
-        test_eq(decoded._sfixed32, all_types._sfixed32);
-        test_eq(decoded._float, all_types._float);
-        test_eq(decoded._fixed64, all_types._fixed64);
-        test_eq(decoded._sfixed64, all_types._sfixed64);
-        test_eq(decoded._double, all_types._double);
-        test_eq(decoded._string, all_types._string);
-        test_eq(decoded._bytes, all_types._bytes);
-        test_eq(decoded._enum, all_types._enum);
-        test_eq(decoded._message.x, all_types._message.x);
-        test_eq(decoded.rep_i32, all_types.rep_i32);
-        test_eq(decoded.rep_i64, all_types.rep_i64);
-        test_eq(decoded.rep_u32, all_types.rep_u32);
-        test_eq(decoded.rep_u64, all_types.rep_u64);
-        test_eq(decoded.rep_bool, all_types.rep_bool);
-        test_eq(decoded.rep_sint32, all_types.rep_sint32);
-        test_eq(decoded.rep_sint64, all_types.rep_sint64);
-        test_eq(decoded.rep_fixed32, all_types.rep_fixed32);
-        test_eq(decoded.rep_sfixed32, all_types.rep_sfixed32);
-        test_eq(decoded.rep_float, all_types.rep_float);
-        test_eq(decoded.rep_fixed64, all_types.rep_fixed64);
-        test_eq(decoded.rep_sfixed64, all_types.rep_sfixed64);
-        test_eq(decoded.rep_double, all_types.rep_double);
-        test_eq(decoded.rep_string, all_types.rep_string);
-        test_eq(decoded.rep_bytes, all_types.rep_bytes);
-        test_eq(decoded.rep_enum, all_types.rep_enum);
-        test_eq(decoded.rep_message.count, all_types.rep_message.count);
-        for decoded.rep_message  test_eq(it.x, all_types.rep_message[it_index].x);
-        FreeContents(*decoded);
+            test_eq(decoded._i32, all_types._i32);
+            test_eq(decoded._i64, all_types._i64);
+            test_eq(decoded._u32, all_types._u32);
+            test_eq(decoded._u64, all_types._u64);
+            test_eq(decoded._bool, all_types._bool);
+            test_eq(decoded._sint32, all_types._sint32);
+            test_eq(decoded._sint64, all_types._sint64);
+            test_eq(decoded._fixed32, all_types._fixed32);
+            test_eq(decoded._sfixed32, all_types._sfixed32);
+            test_eq(decoded._float, all_types._float);
+            test_eq(decoded._fixed64, all_types._fixed64);
+            test_eq(decoded._sfixed64, all_types._sfixed64);
+            test_eq(decoded._double, all_types._double);
+            test_eq(decoded._string, all_types._string);
+            test_eq(decoded._bytes, all_types._bytes);
+            test_eq(decoded._enum, all_types._enum);
+            test_eq(decoded._message.x, all_types._message.x);
+            test_eq(decoded.rep_i32, all_types.rep_i32);
+            test_eq(decoded.rep_i64, all_types.rep_i64);
+            test_eq(decoded.rep_u32, all_types.rep_u32);
+            test_eq(decoded.rep_u64, all_types.rep_u64);
+            test_eq(decoded.rep_bool, all_types.rep_bool);
+            test_eq(decoded.rep_sint32, all_types.rep_sint32);
+            test_eq(decoded.rep_sint64, all_types.rep_sint64);
+            test_eq(decoded.rep_fixed32, all_types.rep_fixed32);
+            test_eq(decoded.rep_sfixed32, all_types.rep_sfixed32);
+            test_eq(decoded.rep_float, all_types.rep_float);
+            test_eq(decoded.rep_fixed64, all_types.rep_fixed64);
+            test_eq(decoded.rep_sfixed64, all_types.rep_sfixed64);
+            test_eq(decoded.rep_double, all_types.rep_double);
+            test_eq(decoded.rep_string, all_types.rep_string);
+            test_eq(decoded.rep_bytes, all_types.rep_bytes);
+            test_eq(decoded.rep_enum, all_types.rep_enum);
+            test_eq(decoded.rep_message.count, all_types.rep_message.count);
+            for decoded.rep_message  test_eq(it.x, all_types.rep_message[it_index].x);
+            FreeContents(*decoded);
+        }
     }
 
     {
         jai_code :: #run generate_jai(parse_proto(ProtoOneOf));
         #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
-        #insert jai_code;
+        else {
+            #insert jai_code;
 
-        message: OneOf;
-        as_bytes := Serialize(message);
-        test_eq(as_bytes, u8.[]);
+            message: OneOf;
+            as_bytes := Serialize(message);
+            test_eq(as_bytes, u8.[]);
 
-        message.x = 1234;
-        message.twigs = 1.0;
-        message.Plant_kind = .twigs;
-        as_bytes = Serialize(message);
+            message.x = 1234;
+            message.twigs = 1.0;
+            message.Plant_kind = .twigs;
+            as_bytes = Serialize(message);
 
-        decoded: OneOf;
-        Parse(*decoded, as_bytes);
+            decoded: OneOf;
+            Parse(*decoded, as_bytes);
 
-        test_eq(decoded.x, 1234);
-        test_eq(decoded.Plant_kind, .twigs);
-        test_eq(decoded.twigs, 1.0);
-        FreeContents(*decoded);
+            test_eq(decoded.x, 1234);
+            test_eq(decoded.Plant_kind, .twigs);
+            test_eq(decoded.twigs, 1.0);
+            FreeContents(*decoded);
+        }
+    }
+
+    {
+        jai_code :: #run generate_jai(parse_proto(#string END
+            message M {
+                int32 x = 1;
+
+                enum E {
+                    v0 = 0;
+                    v1 = 1;
+                }
+
+                E v = 2;
+            }
+        END));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        else {
+            #insert jai_code;
+
+            message: M;
+            as_bytes := Serialize(message);
+            test_eq(as_bytes, u8.[]);
+
+            message.x = 7;
+            message.v = .v1;
+
+            as_bytes = Serialize(message);
+            // TODO: What should the result be?
+            // test_eq(as_bytes, u8.[]);
+            test_eq(as_bytes.count, 4);
+
+            decoded: M;
+            Parse(*decoded, as_bytes);
+            FreeContents(*decoded);
+        }
     }
 }
 

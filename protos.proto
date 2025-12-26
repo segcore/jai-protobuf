@@ -2,9 +2,9 @@ syntax = "proto3";
 package foo.bar;
 
 enum MyEnum {
-    MyEnum_A = 1;
-    MyEnum_B = 2;
-    MyEnum_C = 3;
+    MyEnum_A = 0;
+    MyEnum_B = 1;
+    MyEnum_C = 2;
 }
 
 message SimpleHolder {
@@ -22,4 +22,12 @@ message ManyThings {
         bool tree = 10;
         uint32 flowers = 11;
     }
+
+    enum SubType {
+        SubType_Q = 0;
+        SubType_W = 1;
+        SubType_E = 2;
+    }
+
+    SubType subtype_value = 6;
 }

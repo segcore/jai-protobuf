@@ -2,9 +2,9 @@
 // Generated from protos.proto
 
 MyEnum :: enum {
-    MyEnum_A :: 1;
-    MyEnum_B :: 2;
-    MyEnum_C :: 3;
+    MyEnum_A :: 0;
+    MyEnum_B :: 1;
+    MyEnum_C :: 2;
 }
 SimpleHolder :: struct {
     a: s32;
@@ -15,6 +15,7 @@ ManyThings :: struct {
     maybe_negative: s32 = 42;
     submessage: Test1;
     something: string = "hello"; @deprecated
+    subtype_value: SubType;
     Plant_Kind :: enum {
         _UNSET;
         tree;
@@ -24,6 +25,11 @@ ManyThings :: struct {
     using Plant : union {
         tree: bool;
         flowers: u32;
+    }
+    SubType :: enum {
+        SubType_Q :: 0;
+        SubType_W :: 1;
+        SubType_E :: 2;
     }
 }
 
@@ -86,16 +92,34 @@ Parse :: (message: *SimpleHolder, bytes: []u8) -> ok: bool, used: s64 = 0 {
     return true, bytes.count;
 }
 
+ProtoType_ManyThings_SubType :: ProtoType.ENUM;
+FreeContents :: inline (message: *ManyThings.SubType) {}
+Serialize :: (output: []u8, index: s64, enum_value: ManyThings.SubType, field_number := -1, force := false) -> index: s64 {
+    value := cast(u64, enum_value);
+    if force || value != 0  index = encode_VARINT(output, index, value, field_number);
+    return index;
+}
+Parse :: (enum_value: *ManyThings.SubType, bytes: []u8) -> ok: bool, used: s64 {
+    buf := bytes;
+    ok, value := decode_VARINT(*buf);
+    if !ok return false, 0;
+    enum_value.* = xx,no_check value;
+    used := bytes.count - buf.count;
+    return true, used;
+}
+
 ProtoType_ManyThings :: ProtoType.MESSAGE;
 FreeContents :: (message: *ManyThings) {
     FreeContents(*message.my_enum);
     array_reset(*message.values);
     FreeContents(*message.submessage);
     free(message.something); message.something = "";
+    FreeContents(*message.subtype_value);
 }
 Serialize :: (output: []u8, index: s64, message: ManyThings, field_number := -1, force := false) -> index: s64 {
     default: ManyThings;
     start_index := index;
+    { it := message.subtype_value; index = Serialize(output, index, it, 6); }
     { it := message.something; if it != default.something     index = encode_string(output, index, it, 5); }
     { it := message.submessage; index = Serialize(output, index, it, 4); }
     { it := message.maybe_negative; if it != default.maybe_negative     index = encode_VARINT_zigzag(output, index, it, 3); }
@@ -120,6 +144,7 @@ Parse :: (message: *ManyThings, bytes: []u8) -> ok: bool, used: s64 = 0 {
             case 1; #if ProtoType_MyEnum == .ENUM { message.my_enum = xx,no_check decoded_value; }
             case 3; message.maybe_negative = xx,no_check unzigzag(decoded_value);
             case 4; #if ProtoType_Test1 == .ENUM { message.submessage = xx,no_check decoded_value; }
+            case 6; message.subtype_value = xx,no_check decoded_value;
             case 10; message.tree = xx,no_check decoded_value; message.Plant_kind = .tree;
             case 11; message.flowers = xx,no_check decoded_value; message.Plant_kind = .flowers;
             }
@@ -138,6 +163,7 @@ Parse :: (message: *ManyThings, bytes: []u8) -> ok: bool, used: s64 = 0 {
             case 2; while submessage {ok=, decoded_value := decode_I32_float(*submessage); if !ok return false; array_add(*message.values, decoded_value); }
             case 4; if !Parse(*message.submessage, submessage)  return false;
             case 5; message.something = copy_string(submessage.(string));
+            case 6; if !Parse(*message.subtype_value, submessage)  return false;
             }
         }
     }
