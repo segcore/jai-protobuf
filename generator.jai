@@ -34,6 +34,9 @@ ProtoField :: struct {
     required : bool; // metadata
     packed : bool = true; // pack repeated fields
     deprecated : bool;
+    map: bool;
+    map_key : string;
+    map_value : string;
     field_number: int;
     name: string;
     default: string; // Default value
@@ -70,26 +73,54 @@ parse_proto :: (data: string, source_path: string = "") -> ProtoFile {
 
 generate_jai_free_function :: (sb: *String_Builder, definition: ProtoDefinition, dotted_name: string) {
     sb2: String_Builder;
+
+    should_free :: (type: ProtoType) -> bool {
+        if type == {
+            case .STRING; #through;
+            case .BYTES; #through;
+            case .MESSAGE; return true;
+            case; return false;
+        }
+    }
+    free_function_name :: (type: ProtoType) -> string {
+        if type == {
+            case .STRING; return "free";
+            case .BYTES; return "array_free";
+            case .MESSAGE; return "FreeContents";
+            case; assert(false, "Should not free %", type); return "?";
+        }
+    }
+    pointer :: (type: ProtoType) -> string {
+        if type == {
+            case .MESSAGE; return "*";
+        }
+        return "";
+    }
+
     for field : definition.fields {
-        if field.repeated {
-            if field.type == {
-                case .STRING;
-                    print(*sb2, "    for  message.%  free(it);\n", field.name);
-                case .BYTES;
-                    print(*sb2, "    for  message.%  array_free(it);\n", field.name);
-                case .MESSAGE;
-                    print(*sb2, "    for* message.%  FreeContents(it);\n", field.name);
+        if field.map {
+            free_key := should_free(proto_type(field.map_key));
+            free_value := should_free(proto_type(field.map_value));
+            if free_key || free_value {
+                print(*sb2, "    for* v, k : message.% {", field.name);
+                if free_key   print(*sb2, " %(k);", free_function_name(proto_type(field.map_key)));
+                if free_value print(*sb2, " %(v);", free_function_name(proto_type(field.map_key)));
+                print(*sb2, " }\n", field.name);
+            }
+            print(*sb2, "    deinit(*message.%1); message.%1 = .{};\n", field.name);
+        } else if field.repeated {
+            if should_free(field.type) {
+                print(*sb2, "    for%  message.%  %(it);\n", pointer(field.type), field.name, free_function_name(field.type));
             }
             print(*sb2, "    array_reset(*message.%);\n", field.name);
         } else {
-            if field.type == {
-                case .STRING;
-                    print(*sb2, "    free(message.%1); message.%1 = \"\";\n", field.name);
-                case .BYTES;
-                    print(*sb2, "    array_reset(*message.%1);\n", field.name);
-                case .MESSAGE;
-                    print(*sb2, "    FreeContents(*message.%);\n", field.name);
+            newline := false;
+            if should_free(field.type) {
+                print(*sb2, "    %(%message.%);", free_function_name(field.type), pointer(field.type), field.name);
+                newline = true;
             }
+            if field.type == .STRING  print(*sb2, " message.% = \"\";", field.name);
+            if newline print(*sb2, "\n");
         }
     }
     if builder_string_length(*sb2) == 0 {
@@ -107,7 +138,7 @@ generate_definition :: (sb: *String_Builder, definition: ProtoDefinition, indent
     if #complete definition.kind == {
         case .MESSAGE;
             print(sb, "%0% :: struct {\n", indent, definition.name);
-            for definition.fields  generate_jai_field(sb, it, indent_level + 1);
+            for definition.fields    generate_jai_field(sb, it, indent_level + 1);
             for definition.one_ofs   generate_definition(sb, it, indent_level + 1);
             for definition.subtypes  generate_definition(sb, it, indent_level + 1);
             print(sb, "%}\n", indent);
@@ -277,7 +308,9 @@ generate_jai_for_definitions :: (sb: *String_Builder, set: []ProtoDefinition) {
 
 generate_jai_field :: (sb: *String_Builder, field: ProtoField, indent_level: int) {
     indent := indent_str(indent_level);
-    if field.repeated {
+    if field.map {
+        print(sb, "%0%: Table(%, %)", indent, field.name, jai_type(field.map_key), jai_type(field.map_value));
+    } else if field.repeated {
         print(sb, "%0%: [..]%", indent, field.name, jai_type(field.type, field.type_name));
     } else {
         print(sb, "%0%: %", indent, field.name, jai_type(field.type, field.type_name));
@@ -292,7 +325,9 @@ generate_jai_field :: (sb: *String_Builder, field: ProtoField, indent_level: int
 
 
 generate_jai_serialize_field :: (sb: *String_Builder, field: ProtoField, repeated: bool = false, required: bool = false) {
-    if repeated {
+    if field.map {
+        print(sb, "for message.% { ", field.name);
+    } else if repeated {
         print(sb, "for < message.% { ", field.name);
     } else {
         print(sb, "{ it := message.%; ", field.name);
@@ -300,33 +335,49 @@ generate_jai_serialize_field :: (sb: *String_Builder, field: ProtoField, repeate
 
     may_omit := !(repeated || required);
 
-    if #complete wire_type_for(field.type) == {
+    if field.map {
+        print(sb, "end := index; ");
+        generate_jai_serialize_value(sb, proto_type(field.map_value), 2, "it");
+        print(sb, " ");
+        generate_jai_serialize_value(sb, proto_type(field.map_key), 1, "it_index");
+        print(sb, " index = encode_LEN_from_index(output, index, end, %);", formatInt(field.field_number));
+    } else {
+        omit_name := ifx may_omit then field.name else "";
+        generate_jai_serialize_value(sb, field.type, field.field_number, "it", omit_name);
+    }
+    print(sb, " }\n");
+}
+
+generate_jai_serialize_value :: (sb: *String_Builder, type: ProtoType, field_number: int, id: string, omit_field_name: string = "") {
+    may_omit := omit_field_name != "";
+
+    if #complete wire_type_for(type) == {
     case .VARINT;
-        if may_omit print(sb, "if it != default.%1     ", field.name);
-        if should_zigzag(field.type) {
-            print(sb, "index = encode_VARINT_zigzag(output, index, it, %); }\n", formatInt(field.field_number));
+        if may_omit print(sb, "if % != default.%     ", id, omit_field_name);
+        if should_zigzag(type) {
+            print(sb, "index = encode_VARINT_zigzag(output, index, %, %);", id, formatInt(field_number));
         } else {
-            print(sb, "index = encode_VARINT(output, index, xx,no_check it, %); }\n", formatInt(field.field_number));
+            print(sb, "index = encode_VARINT(output, index, xx,no_check %, %);", id, formatInt(field_number));
         }
     case .I32;
-        if may_omit print(sb, "if it != default.%1     ", field.name);
-        print(sb, "index = encode_I32(output, index, it, %); }\n", formatInt(field.field_number));
+        if may_omit print(sb, "if % != default.%     ", id, omit_field_name);
+        print(sb, "index = encode_I32(output, index, %, %);", id, formatInt(field_number));
     case .I64;
-        if may_omit print(sb, "if it != default.%1     ", field.name);
-        print(sb, "index = encode_I64(output, index, it, %); }\n", formatInt(field.field_number));
+        if may_omit print(sb, "if % != default.%     ", id, omit_field_name);
+        print(sb, "index = encode_I64(output, index, %, %);", id, formatInt(field_number));
     case .LEN;
-        if field.type == {
+        if type == {
         case .STRING;
-            if may_omit print(sb, "if it != default.%1     ", field.name);
-            print(sb, "index = encode_string(output, index, it, %); }\n", formatInt(field.field_number));
+            if may_omit print(sb, "if % != default.%     ", id, omit_field_name);
+            print(sb, "index = encode_string(output, index, %, %);", id, formatInt(field_number));
         case .BYTES;
-            if may_omit print(sb, "if !array_view_equal(message.%1, default.%1)     ", field.name);
-            print(sb, "index = encode_bytes(output, index, it, %); }\n", formatInt(field.field_number));
+            if may_omit print(sb, "if !array_view_equal(message.%1, default.%1)     ", omit_field_name);
+            print(sb, "index = encode_bytes(output, index, %, %);", id, formatInt(field_number));
         case .MESSAGE;
             force := ifx may_omit then "" else ", force=true";
-            print(sb, "index = Serialize(output, index, it, %1%2); }\n", formatInt(field.field_number), force);
+            print(sb, "index = Serialize(output, index, %, %0%0);", id, formatInt(field_number), force);
         case;
-            log("Unknown LEN field for %", field);
+            log("Unknown LEN field for %", type);
         }
     case .SGROUP;
     case .EGROUP;
@@ -340,7 +391,7 @@ generate_jai_parse_field :: (sb: *String_Builder, definition: ProtoDefinition, f
 
     // We have not detected the "real" types of subfields as Message vs Enum, and Message is assumed during parsing.
     // So we have some extra logic here to deal with it
-    if field.type == .MESSAGE {
+    if field.type == .MESSAGE && !field.map {
         type_definition := resolve_definition(definition, field.type_name);
         if type_definition {
             if type_definition.kind == .ENUM {
@@ -403,7 +454,10 @@ generate_jai_parse_field :: (sb: *String_Builder, definition: ProtoDefinition, f
                     case .MESSAGE;
                         // Could be a repeated enum, or a Message
                         // Messages consume all of the bytes, and repeated enums may not
-                        if repeated {
+
+                        if field.map {
+                            print(sb, "/* TODO: maps */");
+                        } else if repeated {
                             print(sb, "while true { ok=, used := Parse(array_add(*message.%), submessage); if !ok return false; submessage = array_view(submessage, used); if !submessage break; }", field.name);
                         } else {
                             print(sb, "if !Parse(*message.%, submessage)  return false;", field.name);
@@ -744,14 +798,38 @@ parse_field :: (p: *Parser, definition: *ProtoDefinition) -> ok: bool {
         }
     }
 
+    // Field type
     if definition.kind != .ENUM {
         ok, type_name := parse(p, .ID);
         if !ok return false;
 
-        field.type_name = type_name;
-        field.type = proto_type(type_name);
+        if type_name == "map" {
+            type_start := type_name;
+            if !parse(p, .OANGLE) return false;
+            ok=, key_name := parse(p, .ID);
+            if !ok return false;
+
+            if !parse(p, .COMMA) return false;
+            ok=, value_name := parse(p, .ID);
+            if !ok return false;
+
+            ok=, end_point := parse(p, .CANGLE);
+            if !ok return false;
+
+            type_name.data = type_start.data;
+            type_name.count = end_point.data - type_start.data + end_point.count;
+            field.map = true;
+            field.map_key = key_name;
+            field.map_value = value_name;
+            field.type_name = type_name;
+            field.type = .MESSAGE; // Maps are repeated .MESSAGE on the wire
+        } else {
+            field.type_name = type_name;
+            field.type = proto_type(type_name);
+        }
     }
 
+    // Field name
     ok, name := parse(p, .ID);
     if !ok return false;
     field.name = name;
@@ -830,7 +908,7 @@ peek :: (p: *Parser) -> Token {
     t: Token;
     i := 0;
 
-    if is_any(str[i], ",;{}[]=") {
+    if is_any(str[i], ",;{}[]<>=") {
         t.text = slice(str, 0, 1);
         if str[i] == {
             case ",";
@@ -850,6 +928,12 @@ peek :: (p: *Parser) -> Token {
                 return t;
             case "]";
                 t.kind = .CSQUARE;
+                return t;
+            case "<";
+                t.kind = .OANGLE;
+                return t;
+            case ">";
+                t.kind = .CANGLE;
                 return t;
             case "=";
                 t.kind = .EQ;
@@ -910,6 +994,8 @@ TokenKind :: enum {
     CCURLY;
     OSQUARE;
     CSQUARE;
+    OANGLE;
+    CANGLE;
     EQ;
     COMMA; // between reserved field values
 

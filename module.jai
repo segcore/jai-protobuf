@@ -142,6 +142,11 @@ jai_type :: (type: ProtoType, type_name: string) -> string {
     }
 }
 
+jai_type :: (type_name: string) -> string {
+    type := proto_type(type_name);
+    return jai_type(type, type_name);
+}
+
 array_view_equal :: (a: []u8, b: []u8) -> bool {
     if a.count != b.count return false;
     equal := memcmp(a.data, b.data, a.count) == 0;

@@ -16,6 +16,7 @@ ManyThings :: struct {
     submessage: Test1;
     something: string = "hello"; @deprecated
     subtype_value: SubType;
+    name_mapping: Table(string, s32);
     Plant_Kind :: enum {
         _UNSET;
         tree;
@@ -115,10 +116,13 @@ FreeContents :: (message: *ManyThings) {
     FreeContents(*message.submessage);
     free(message.something); message.something = "";
     FreeContents(*message.subtype_value);
+    for* v, k : message.name_mapping { free(k); }
+    deinit(*message.name_mapping); message.name_mapping = .{};
 }
 Serialize :: (output: []u8, index: s64, message: ManyThings, field_number := -1, force := false) -> index: s64 {
     default: ManyThings;
     start_index := index;
+    for message.name_mapping { end := index; index = encode_VARINT(output, index, xx,no_check it, 2); index = encode_string(output, index, it_index, 1); index = encode_LEN_from_index(output, index, end, 7); }
     { it := message.subtype_value; index = Serialize(output, index, it, 6); }
     { it := message.something; if it != default.something     index = encode_string(output, index, it, 5); }
     { it := message.submessage; index = Serialize(output, index, it, 4); }
@@ -163,6 +167,7 @@ Parse :: (message: *ManyThings, bytes: []u8) -> ok: bool, used: s64 = 0 {
             case 2; while submessage {ok=, decoded_value := decode_I32_float(*submessage); if !ok return false; array_add(*message.values, decoded_value); }
             case 4; if !Parse(*message.submessage, submessage)  return false;
             case 5; message.something = copy_string(submessage.(string));
+            case 7; /* TODO: maps */
             }
         }
     }

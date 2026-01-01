@@ -1,6 +1,7 @@
 #load "module.jai";
 #load "generator.jai";
 #import "File";
+#import "Hash_Table";
 
 main :: () {
     context.print_style.default_format_int.base = 16;
@@ -809,6 +810,40 @@ test_generate :: () {
             Parse(*decoded, as_bytes);
             test_eq(decoded.sub.evalue, message.sub.evalue);
             test_eq(decoded.xvalue, message.xvalue);
+            FreeContents(*decoded);
+        }
+    }
+
+    {
+        jai_code :: #run generate_jai(parse_proto(#string END
+            message M {
+                map<string, int32> name_mapping = 1;
+                int32 x = 2;
+            }
+        END));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        else {
+            #insert jai_code;
+
+            message: M;
+            as_bytes := Serialize(message);
+            test_eq(as_bytes, u8.[]);
+
+            table_add(*message.name_mapping, "hello", 15);
+            as_bytes = Serialize(message);
+            // name_mapping is a repeated Message of { key=1; value=2; } on the wire
+            // name_mapping[0].key == "hello" -> 000_1'010 0x05 "hello" -> 0x0A 05 "h" "e" "l" "l" "o"
+            // name_mapping[0].value == 15 -> 001_0'000 0x0F -> 0x10 0F
+            // Wrapped up in a LEN for the message, field_number = 1;
+            //  LEN(wire:2) length 9 [] -> 000_1'010 0x09, [] -> 0x0A 0x09
+            test_eq(as_bytes, u8.[0x0A, 0x09, 0x0A, 0x05, "h", "e", "l", "l", "o", 0x10, 0x0F]);
+
+            decoded: M;
+            Parse(*decoded, as_bytes);
+            print("%\n", decoded);
+            found, value := table_find(*decoded.name_mapping, "hello");
+            test_eq(found, true);
+            test_eq(value, 15);
             FreeContents(*decoded);
         }
     }

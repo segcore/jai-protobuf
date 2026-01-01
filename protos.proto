@@ -30,4 +30,5 @@ message ManyThings {
     }
 
     SubType subtype_value = 6;
+    map<string, int32> name_mapping = 7;
 }
