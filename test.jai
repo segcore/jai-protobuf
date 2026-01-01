@@ -625,12 +625,190 @@ test_generate :: () {
             message.v = .v1;
 
             as_bytes = Serialize(message);
-            // TODO: What should the result be?
-            // test_eq(as_bytes, u8.[]);
-            test_eq(as_bytes.count, 4);
+            // M.x = 7 --> field_number=1, wire_type=VARINT --> c000_1'000 = 08. Value -> 7 --> final: 08 07
+            // M.v = 1 --> field_number=2, wire_type=VARINT --> c001_0'000 = 10. Value -> 1 --> final: 10 01
+            test_eq(as_bytes, u8.[0x08, 0x07, 0x10, 0x01]);
 
             decoded: M;
             Parse(*decoded, as_bytes);
+            test_eq(decoded.x, message.x);
+            test_eq(decoded.v, message.v);
+            FreeContents(*decoded);
+        }
+    }
+
+    {
+        jai_code :: #run generate_jai(parse_proto(#string END
+            message M {
+                int32 x = 1;
+
+                message Sub {
+                    int32 subx = 1;
+                    int32 suby = 2;
+                }
+
+                Sub sub = 2;
+            }
+        END));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        else {
+            #insert jai_code;
+
+            message: M;
+            as_bytes := Serialize(message);
+            test_eq(as_bytes, u8.[]);
+
+            message.sub.subx = 2;
+            message.sub.suby = 3;
+            as_bytes = Serialize(message);
+            // LEN: [Sub]
+            // Sub.subx -> 000_1000, 0x02 -> 0x0802
+            // Sub.suby -> 001_0000, 0x03 -> 0x1003
+            // -> LEN(wire:2) of 4, field_number=2 -> 001_0'010 0x04 [bytes] -> 0x1204 []
+            test_eq(as_bytes, u8.[0x12, 0x04, 0x08, 0x02, 0x10, 0x03]);
+
+            decoded: M;
+            Parse(*decoded, as_bytes);
+            test_eq(decoded.sub.subx, message.sub.subx);
+            test_eq(decoded.sub.suby, message.sub.suby);
+            FreeContents(*decoded);
+        }
+    }
+
+    {
+        jai_code :: #run generate_jai(parse_proto(#string END
+            message M {
+                enum MyEnum {
+                    v0 = 0;
+                    v1 = 1;
+                }
+                message Sub {
+                    MyEnum evalue = 2;
+                }
+                Sub sub = 1;
+            }
+        END));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        else {
+            #insert jai_code;
+
+            message: M;
+            as_bytes := Serialize(message);
+            test_eq(as_bytes, u8.[]);
+
+            message.sub.evalue = .v1;
+            as_bytes = Serialize(message);
+            // sub.evalue = .v1 -> value = 1, VARINT, field_number=2; --> 001_0'000 0x01 = 0x1001
+            // sub: LEN(wire:2) of above length (2), field_number=1 -> 000_1'010 0x02 = 0x0A02
+            test_eq(as_bytes, u8.[0x0A, 0x02, 0x10, 0x01]);
+
+            decoded: M;
+            Parse(*decoded, as_bytes);
+            test_eq(decoded.sub.evalue, message.sub.evalue);
+            FreeContents(*decoded);
+        }
+    }
+
+    {
+        jai_code :: #run generate_jai(parse_proto(#string END
+            message M {
+                enum MyEnum {
+                    v0 = 0;
+                    v1 = 1;
+                }
+                message Sub {
+                    M.MyEnum evalue = 2;
+                }
+                Sub sub = 1;
+            }
+        END));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        else {
+            #insert jai_code;
+
+            message: M;
+            as_bytes := Serialize(message);
+            test_eq(as_bytes, u8.[]);
+
+            message.sub.evalue = .v1;
+            as_bytes = Serialize(message);
+            // sub.evalue = .v1 -> value = 1, VARINT, field_number=2; --> 001_0'000 0x01 = 0x1001
+            // sub: LEN(wire:2) of above length (2), field_number=1 -> 000_1'010 0x02 = 0x0A02
+            test_eq(as_bytes, u8.[0x0A, 0x02, 0x10, 0x01]);
+
+            decoded: M;
+            Parse(*decoded, as_bytes);
+            test_eq(decoded.sub.evalue, message.sub.evalue);
+            FreeContents(*decoded);
+        }
+    }
+
+    {
+        jai_code :: #run generate_jai(parse_proto(#string END
+            message M {
+                message Sub {
+                    enum MyEnum {
+                        v0 = 0;
+                        v1 = 1;
+                    }
+                    Sub.MyEnum evalue = 2;
+                }
+                Sub sub = 1;
+                Sub.MyEnum xvalue = 3;
+            }
+        END));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        else {
+            #insert jai_code;
+
+            message: M;
+            as_bytes := Serialize(message);
+            test_eq(as_bytes, u8.[]);
+
+            message.sub.evalue = .v1;
+            message.xvalue = .v1;
+            as_bytes = Serialize(message);
+            test_eq(as_bytes, u8.[0x0A, 0x02, 0x10, 0x01, 0x18, 0x01]);
+
+            decoded: M;
+            Parse(*decoded, as_bytes);
+            test_eq(decoded.sub.evalue, message.sub.evalue);
+            test_eq(decoded.xvalue, message.xvalue);
+            FreeContents(*decoded);
+        }
+    }
+
+    {
+        jai_code :: #run generate_jai(parse_proto(#string END
+            message M {
+                message Sub {
+                    enum MyEnum {
+                        v0 = 0;
+                        v1 = 1;
+                    }
+                    .M.Sub.MyEnum evalue = 2;
+                }
+                Sub sub = 1;
+                .M.Sub.MyEnum xvalue = 3;
+            }
+        END));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        else {
+            #insert jai_code;
+
+            message: M;
+            as_bytes := Serialize(message);
+            test_eq(as_bytes, u8.[]);
+
+            message.sub.evalue = .v1;
+            message.xvalue = .v1;
+            as_bytes = Serialize(message);
+            test_eq(as_bytes, u8.[0x0A, 0x02, 0x10, 0x01, 0x18, 0x01]);
+
+            decoded: M;
+            Parse(*decoded, as_bytes);
+            test_eq(decoded.sub.evalue, message.sub.evalue);
+            test_eq(decoded.xvalue, message.xvalue);
             FreeContents(*decoded);
         }
     }

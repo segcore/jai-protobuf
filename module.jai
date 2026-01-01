@@ -135,9 +135,10 @@ jai_type :: (type: ProtoType, type_name: string) -> string {
         case .BYTES;
             return "[]u8";
         case .ENUM;
-            return type_name;
+            // Trim the "global" namespace prefix
+            return trim_left(type_name, ".");
         case .MESSAGE;
-            return type_name;
+            return trim_left(type_name, ".");
     }
 }
 

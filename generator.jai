@@ -102,14 +102,14 @@ generate_jai_free_function :: (sb: *String_Builder, definition: ProtoDefinition,
 }
 
 
-generate_definition :: (sb: *String_Builder, definition: *ProtoDefinition, indent_level := 0) {
+generate_definition :: (sb: *String_Builder, definition: ProtoDefinition, indent_level := 0) {
     indent := indent_str(indent_level);
     if #complete definition.kind == {
         case .MESSAGE;
             print(sb, "%0% :: struct {\n", indent, definition.name);
             for definition.fields  generate_jai_field(sb, it, indent_level + 1);
-            for* definition.one_ofs   generate_definition(sb, it, indent_level + 1);
-            for* definition.subtypes  generate_definition(sb, it, indent_level + 1);
+            for definition.one_ofs   generate_definition(sb, it, indent_level + 1);
+            for definition.subtypes  generate_definition(sb, it, indent_level + 1);
             print(sb, "%}\n", indent);
         case .ENUM;
             print(sb, "%0% :: enum {\n", indent, definition.name);
@@ -143,7 +143,7 @@ generate_jai :: (p: ProtoFile) -> string {
     if p.source_path  print(*sb, "// Generated from %\n", p.source_path);
     print(*sb, "\n");
 
-    for* p.definitions  generate_definition(*sb, it); 
+    for p.definitions  generate_definition(*sb, it); 
 
     print(*sb, "\n\n");
 
@@ -334,9 +334,22 @@ generate_jai_serialize_field :: (sb: *String_Builder, field: ProtoField, repeate
 }
 
 generate_jai_parse_field :: (sb: *String_Builder, definition: ProtoDefinition, field: ProtoField, wire_type: WireType, repeated: bool) -> bool {
+    field_type := wire_type_for(field.type);
+
+    known_type := true;
+
     // We have not detected the "real" types of subfields as Message vs Enum, and Message is assumed during parsing.
     // So we have some extra logic here to deal with it
-    field_type := wire_type_for(field.type);
+    if field.type == .MESSAGE {
+        type_definition := resolve_definition(definition, field.type_name);
+        if type_definition {
+            if type_definition.kind == .ENUM {
+                field_type = .VARINT;
+            }
+        } else {
+            known_type = false;
+        }
+    }
     changed: bool = false;
 
     set_kind :: (sb: *String_Builder, definition: ProtoDefinition, field: ProtoField) {
@@ -347,23 +360,14 @@ generate_jai_parse_field :: (sb: *String_Builder, definition: ProtoDefinition, f
 
     if wire_type == {
         case .VARINT;
-            maybe_enum := field.type == .MESSAGE;
-            if field_type == .VARINT || maybe_enum {
+            if field_type == .VARINT || !known_type {
                 print(sb, "            case %; ", formatInt(field.field_number));
-
-                // If this is an enum AND is in the parent heirarchy of this definition, then
-                // we know we can encode it, otherwise assume it is global and use ProtoType_% check.
-                type_definition := resolve_definition(definition, field.type_name);
-                if type_definition && type_definition.kind == .ENUM {
-                    maybe_enum = false;
-                }
-
-                if maybe_enum  print(sb, "#if ProtoType_% == .ENUM { ", field.type_name);
+                if !known_type  print(sb, "#if ProtoType_% == .ENUM { ", id_name_for(field.type_name,, temp));
                 value_string := ifx should_zigzag(field.type) "unzigzag(decoded_value)" else "decoded_value";
                 if repeated print(sb, "array_add(*message.%, xx,no_check %);", field.name, value_string);
                 else              print(sb, "message.% = xx,no_check %;", field.name, value_string);
                 set_kind(sb, definition, field);
-                if maybe_enum  print(sb, " }");
+                if !known_type  print(sb, " }");
 
                 print(sb, "\n");
                 changed = true;
@@ -433,28 +437,59 @@ generate_jai_parse_field :: (sb: *String_Builder, definition: ProtoDefinition, f
 
 
 resolve_definition :: (location: ProtoDefinition, type_name: string) -> *ProtoDefinition {
-    // TODO: Expand this to work up the parent trees and resolve down
-    for sub : location.subtypes {
-        if sub.name == type_name {
-            return *sub;
+    result: *ProtoDefinition = null;
+    // if type_name contains a . means that we need to descend into that subtype first
+    left := find_index_from_left(type_name, ".");
+    if left == 0 {
+        // "." at the beginning, do not perform relative resolution
+        return null;
+    } else if left > 0 {
+        subfield := slice(type_name, 0, left);
+        right := slice(type_name, left + 1);
+        for sub : location.subtypes {
+            if sub.name == subfield {
+                result = resolve_definition(sub, right);
+                break;
+            }
+        }
+    } else {
+        // Find exact subtype with this name
+        for* sub : location.subtypes {
+            if sub.name == type_name {
+                result = sub;
+                break;
+            }
         }
     }
-    return null;
+
+    // No exact match, look higher up in the hierarchy for a matching name
+    if !result && location.parent {
+        result = resolve_definition(location.parent, type_name);
+    }
+
+    return result;
 }
 
 
-build_path_up :: (definition: ProtoDefinition, seperator: string) -> string {
+id_name_for :: (name: string) -> string {
+    s := trim_left(name, "."); // global namespace strip
+    if !contains(s, ".") return s;
+    return replace(s, ".", "_");
+}
+
+
+build_path_up :: (definition: ProtoDefinition, separator: string) -> string {
     if !definition.parent  return definition.name;
 
-    build :: (tmp: *String_Builder, definition: ProtoDefinition, seperator: string) {
-        if definition.parent  build(tmp, definition.parent, seperator);
-        if builder_string_length(tmp)  append(tmp, seperator);
+    build :: (tmp: *String_Builder, definition: ProtoDefinition, separator: string) {
+        if definition.parent  build(tmp, definition.parent, separator);
+        if builder_string_length(tmp)  append(tmp, separator);
         append(tmp, definition.name);
     }
 
     tmp: String_Builder;
     init_string_builder(*tmp,, temp);
-    build(*tmp, definition, seperator);
+    build(*tmp, definition, separator);
     return builder_to_string(*tmp);
 }
 
@@ -492,17 +527,7 @@ parse_primary :: (p: *Parser, out: *ProtoFile) -> keep_going: bool {
             ok=, package := parse_package(p);
             out.package = package;
         case "message";
-            ok=, message_name := parse(p, .ID);
-            if !ok return true;
-
-            definition: *ProtoDefinition = array_add(*out.definitions);
-            definition.kind = .MESSAGE;
-            definition.name = message_name;
-
-            ok = parse(p, .OCURLY);
-            if !ok return true;
-
-            parse_message_fields(p, definition);
+            ok = parse_message(p, *out.definitions, null);
             return true;
         case "enum";
             parse_enum(p, *out.definitions, null);
@@ -593,6 +618,24 @@ parse_reserved :: (p: *Parser, definition: *ProtoDefinition) -> ok: bool {
     return true;
 }
 
+
+parse_message :: (p: *Parser, output_array: *[..]ProtoDefinition, parent: *ProtoDefinition) -> ok: bool {
+    ok, message_name := parse(p, .ID);
+    if !ok return true;
+
+    ok = parse(p, .OCURLY);
+    if !ok return false;
+
+    definition: *ProtoDefinition = array_add(output_array);
+    definition.kind = .MESSAGE;
+    definition.name = message_name;
+    definition.parent = parent;
+
+    ok = parse_message_fields(p, definition);
+    return ok;
+}
+
+
 parse_enum :: (p: *Parser, output_array: *[..]ProtoDefinition, parent: *ProtoDefinition) -> ok: bool {
     ok, message_name := parse(p, .ID);
     if !ok return false;
@@ -636,7 +679,7 @@ parse_message_fields :: (p: *Parser, definition: *ProtoDefinition) -> ok: bool {
             if t.text == {
             case "reserved"; parse_reserved(p, definition);
             case "oneof";    parse_oneof(p, definition);
-            case "message";  // parse_message(p, definition);
+            case "message";  next(p); parse_message(p, *definition.subtypes, definition);
             case "enum";     next(p); parse_enum(p, *definition.subtypes, definition);
             case;
                 parse_field(p, definition);

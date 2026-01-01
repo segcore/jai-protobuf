@@ -163,7 +163,6 @@ Parse :: (message: *ManyThings, bytes: []u8) -> ok: bool, used: s64 = 0 {
             case 2; while submessage {ok=, decoded_value := decode_I32_float(*submessage); if !ok return false; array_add(*message.values, decoded_value); }
             case 4; if !Parse(*message.submessage, submessage)  return false;
             case 5; message.something = copy_string(submessage.(string));
-            case 6; if !Parse(*message.subtype_value, submessage)  return false;
             }
         }
     }

@@ -31,7 +31,7 @@ double up?
 * [x] Decode primitive types
 * [x] Parse protobuf description files
   * [x] Basic
-  * [ ] Nested messages/enums
+  * [x] Nested messages/enums
   * [x] comments (ignored)
   * [x] import (ignored)
   * [x] package (passed to user)
