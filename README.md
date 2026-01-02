@@ -41,8 +41,8 @@ double up?
   * [ ] `Any` type
 * [x] Generate Jai enums
 * [x] Generate Jai structures
-* [x] Generate Jai serializer functions
-* [x] Generate Jai de-serializer functions
+* [x] Generate Jai serialize functions
+* [x] Generate Jai deserialize functions
 * [x] Repeated fields
   * [x] Unpacked repeated fields
   * [ ] Packed repeated fields - Encode

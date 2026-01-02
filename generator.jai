@@ -1,5 +1,8 @@
 /**
- * Parse protobuf files
+ * Parse protobuf files and generate Jai
+ * - Structs / Enums
+ * - Serializer functions
+ * - Deserializer functions
  */
 
 ProtoFile :: struct {
@@ -58,7 +61,7 @@ ProtoOption :: struct {
 
 INDENT :: 4;
 
-parse_proto :: (data: string, source_path: string = "") -> ProtoFile {
+parse_proto_text :: (data: string, source_path: string = "") -> ProtoFile {
     out: ProtoFile;
     out.source_path = source_path;
     p: Parser;
@@ -68,6 +71,204 @@ parse_proto :: (data: string, source_path: string = "") -> ProtoFile {
     }
 
     return out;
+}
+
+parse_proto_file :: (source_path: string) -> ProtoFile {
+    return parse_proto_text(read_entire_file(source_path), source_path);
+}
+
+
+generate_jai :: (p: ProtoFile) -> string {
+    sb: String_Builder;
+
+    print(*sb, "// !!! Automatically generated code !!!\n");
+    if p.source_path  print(*sb, "// Generated from %\n", p.source_path);
+    print(*sb, "\n");
+
+    for p.definitions  generate_definition(*sb, it); 
+
+    print(*sb, "\n\n");
+
+    print(*sb, "// Serialize any message type into bytes. Allocates memory.\n");
+    print(*sb, "Serialize :: (message: $T) -> []u8 {\n");
+    print(*sb, "    buf: []u8;\n");
+    print(*sb, "    index := Serialize(buf, 0, message);\n");
+    print(*sb, "    array_resize(*buf, -index, false);\n");
+    print(*sb, "    index = Serialize(buf, buf.count, message);\n");
+    print(*sb, "    assert(index == 0, \"Current index should be 0 but is \%\", index);\n");
+    print(*sb, "    return buf;\n");
+    print(*sb, "}\n\n");
+
+    generate_jai_for_definitions(*sb, p.definitions);
+
+    return builder_to_string(*sb);
+}
+
+// -------------
+// You probably won't need functions below here.
+// -------------
+
+generate_definition :: (sb: *String_Builder, definition: ProtoDefinition, indent_level := 0) {
+    indent := indent_str(indent_level);
+    if #complete definition.kind == {
+        case .MESSAGE;
+            print(sb, "%0% :: struct {\n", indent, definition.name);
+            for definition.fields    generate_jai_field(sb, it, indent_level + 1);
+            for definition.one_ofs   generate_definition(sb, it, indent_level + 1);
+            for definition.subtypes  generate_definition(sb, it, indent_level + 1);
+            print(sb, "%}\n", indent);
+        case .ENUM;
+            print(sb, "%0% :: enum {\n", indent, definition.name);
+            for field : definition.fields {
+                print(sb, "%    % :: %;\n", indent, field.name, formatInt(field.field_number, base=10));
+            }
+            print(sb, "%}\n", indent);
+        case .ONE_OF;
+            indent := indent_str(indent_level);
+            // Generate Enum for Kind
+            print(sb, "%0%_Kind :: enum {\n", indent, definition.name);
+            print(sb, "%    _UNSET;\n", indent, definition.name);
+            for field : definition.fields {
+                print(sb, "%    %;\n", indent, field.name);
+            }
+            print(sb, "%}\n", indent);
+            print(sb, "%0%2_kind: %2_Kind;\n", indent, definition.name);
+
+            // Generate fields
+            print(sb, "%using % : union {\n", indent, definition.name);
+            for definition.fields  generate_jai_field(sb, it, indent_level + 1);
+            print(sb, "%}\n", indent, definition.name);
+    }
+}
+
+
+generate_jai_for_definitions :: (sb: *String_Builder, set: []ProtoDefinition) {
+    for definition : set {
+        generate_jai_for_definitions(sb, definition.subtypes);
+
+        id_name := build_path_up(definition, "_");
+        dotted_name := build_path_up(definition, ".");
+
+        print(sb, "\n");
+        print(sb, "ProtoType_% :: ProtoType.%;\n", id_name, definition.kind);
+
+        generate_jai_free_function(sb, definition, dotted_name);
+
+        if #complete definition.kind == {
+            case .MESSAGE;
+                print(sb, "Serialize :: (output: []u8, index: s64, message: %, field_number := -1, force := false) -> index: s64 {\n", dotted_name);
+                print(sb, "    default: %;\n", dotted_name);
+                print(sb, "    start_index := index;\n");
+
+                // Serialise backwards because the encoder encodes the last bytes first
+                // so it will end up in the normal 'forward' order
+                for < field : definition.fields {
+                    print(sb, "    ");
+                    generate_jai_serialize_field(sb, field, field.repeated, field.required);
+                }
+                for < oneof : definition.one_ofs {
+                    print(sb, "    if message.%_kind == {\n", oneof.name);
+                    for field : oneof.fields {
+                        print(sb, "        case .%1; ", field.name);
+                        generate_jai_serialize_field(sb, field, required=true);
+                    }
+                    print(sb, "    }\n", oneof.name);
+                }
+                print(sb, "    if field_number >= 0 && (force || index != start_index)   index = encode_LEN_from_index(output, index, start_index, field_number);\n");
+                print(sb, "    return index;\n");
+                print(sb, "}\n");
+
+                sbtmp: String_Builder;
+                changed: bool;
+                print(sb, "Deserialize :: (message: *%, bytes: []u8) -> ok: bool, used: s64 = 0 {\n", dotted_name);
+                print(sb, "    buf := bytes;\n");
+                print(sb, "    while buf {\n");
+                print(sb, "        ok, wire_type, field_number := decode_tag(*buf);\n");
+                print(sb, "        if !ok return false;\n");
+                // Switch over wire's type, so we always advance over any unknown fields, and fields with mismatched types
+                print(sb, "        if wire_type == {\n");
+
+                changed = false;
+                print(sb, "        case .VARINT;\n");
+                print(sb, "            ok=, decoded_value := decode_VARINT(*buf);  if !ok return false;\n");
+                print(*sbtmp, "            if field_number == {\n");
+                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, definition, field, .VARINT, field.repeated);
+                for definition.one_ofs  for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, it, field, .VARINT, false);
+                print(*sbtmp, "            }\n");
+                if changed  append_and_steal_buffers(sb, *sbtmp);
+                reset(*sbtmp);
+
+                changed = false;
+                print(sb, "        case .I32;\n");
+                print(sb, "            ok=, decoded_value := decode_I32(*buf);  if !ok return false;\n");
+                print(*sbtmp, "            decoded_value_float := (*decoded_value).(*float32).*;\n");
+                print(*sbtmp, "            if field_number == {\n");
+                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, definition, field, .I32, field.repeated);
+                for definition.one_ofs  for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, it, field, .I32, false);
+                print(*sbtmp, "            }\n");
+                if changed  append_and_steal_buffers(sb, *sbtmp);
+                reset(*sbtmp);
+
+                changed = false;
+                print(sb, "        case .I64;\n");
+                print(sb, "            ok=, decoded_value := decode_I64(*buf);  if !ok return false;\n");
+                print(*sbtmp, "            decoded_value_float := (*decoded_value).(*float64).*;\n");
+                print(*sbtmp, "            if field_number == {\n");
+                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, definition, field, .I64, field.repeated);
+                for definition.one_ofs  for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, it, field, .I64, false);
+                print(*sbtmp, "            }\n");
+                if changed  append_and_steal_buffers(sb, *sbtmp);
+                reset(*sbtmp);
+
+                changed = false;
+                print(sb, "        case .LEN;\n");
+                print(sb, "            ok=, _, submessage := decode_LEN(*buf);  if !ok return false;\n");
+                print(*sbtmp, "            if field_number == {\n");
+                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, definition, field, .LEN, field.repeated);
+                for definition.one_ofs  for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, it, field, .LEN, false);
+                print(*sbtmp, "            }\n");
+                if changed  append_and_steal_buffers(sb, *sbtmp);
+                reset(*sbtmp);
+
+                print(sb, "        }\n");
+                print(sb, "    }\n");
+                // Messages always use all of the bytes
+                print(sb, "    return true, bytes.count;\n");
+                print(sb, "}\n");
+            case .ENUM;
+                print(sb, "Serialize :: (output: []u8, index: s64, enum_value: %, field_number := -1, force := false) -> index: s64 {\n", dotted_name);
+                print(sb, "    value := cast(u64, enum_value);\n");
+                print(sb, "    if force || value != 0  index = encode_VARINT(output, index, value, field_number);\n");
+                print(sb, "    return index;\n");
+                print(sb, "}\n");
+                print(sb, "Deserialize :: (enum_value: *%, bytes: []u8) -> ok: bool, used: s64 {\n", dotted_name);
+                print(sb, "    buf := bytes;\n");
+                print(sb, "    ok, value := decode_VARINT(*buf);\n");
+                print(sb, "    if !ok return false, 0;\n");
+                print(sb, "    enum_value.* = xx,no_check value;\n");
+                print(sb, "    used := bytes.count - buf.count;\n");
+                print(sb, "    return true, used;\n");
+                print(sb, "}\n");
+            case .ONE_OF;
+        }
+    }
+}
+
+generate_jai_field :: (sb: *String_Builder, field: ProtoField, indent_level: int) {
+    indent := indent_str(indent_level);
+    if field.map {
+        print(sb, "%0%: Table(%, %)", indent, field.name, jai_type(field.map_key), jai_type(field.map_value));
+    } else if field.repeated {
+        print(sb, "%0%: [..]%", indent, field.name, jai_type(field.type, field.type_name));
+    } else {
+        print(sb, "%0%: %", indent, field.name, jai_type(field.type, field.type_name));
+    }
+    if field.default print(sb, " = %", field.default);
+    print(sb, ";");
+    if field.deprecated print(sb, " @deprecated");
+    if field.optional print(sb, " @optional");
+    if field.required print(sb, " @required");
+    print(sb, "\n");
 }
 
 
@@ -130,197 +331,6 @@ generate_jai_free_function :: (sb: *String_Builder, definition: ProtoDefinition,
         append_and_steal_buffers(sb, *sb2);
         print(sb, "}\n");
     }
-}
-
-
-generate_definition :: (sb: *String_Builder, definition: ProtoDefinition, indent_level := 0) {
-    indent := indent_str(indent_level);
-    if #complete definition.kind == {
-        case .MESSAGE;
-            print(sb, "%0% :: struct {\n", indent, definition.name);
-            for definition.fields    generate_jai_field(sb, it, indent_level + 1);
-            for definition.one_ofs   generate_definition(sb, it, indent_level + 1);
-            for definition.subtypes  generate_definition(sb, it, indent_level + 1);
-            print(sb, "%}\n", indent);
-        case .ENUM;
-            print(sb, "%0% :: enum {\n", indent, definition.name);
-            for field : definition.fields {
-                print(sb, "%    % :: %;\n", indent, field.name, formatInt(field.field_number, base=10));
-            }
-            print(sb, "%}\n", indent);
-        case .ONE_OF;
-            indent := indent_str(indent_level);
-            // Generate Enum for Kind
-            print(sb, "%0%_Kind :: enum {\n", indent, definition.name);
-            print(sb, "%    _UNSET;\n", indent, definition.name);
-            for field : definition.fields {
-                print(sb, "%    %;\n", indent, field.name);
-            }
-            print(sb, "%}\n", indent);
-            print(sb, "%0%2_kind: %2_Kind;\n", indent, definition.name);
-
-            // Generate fields
-            print(sb, "%using % : union {\n", indent, definition.name);
-            for definition.fields  generate_jai_field(sb, it, indent_level + 1);
-            print(sb, "%}\n", indent, definition.name);
-    }
-}
-
-
-generate_jai :: (p: ProtoFile) -> string {
-    sb: String_Builder;
-
-    print(*sb, "// !!! Automatically generated code !!!\n");
-    if p.source_path  print(*sb, "// Generated from %\n", p.source_path);
-    print(*sb, "\n");
-
-    for p.definitions  generate_definition(*sb, it); 
-
-    print(*sb, "\n\n");
-
-    print(*sb, "// Serialize any message type into bytes. Allocates memory.\n");
-    print(*sb, "Serialize :: (message: $T) -> []u8 {\n");
-    print(*sb, "    buf: []u8;\n");
-    print(*sb, "    index := Serialize(buf, 0, message);\n");
-    print(*sb, "    array_resize(*buf, -index, false);\n");
-    print(*sb, "    index = Serialize(buf, buf.count, message);\n");
-    print(*sb, "    assert(index == 0, \"Current index should be 0 but is \%\", index);\n");
-    print(*sb, "    return buf;\n");
-    print(*sb, "}\n\n");
-
-    generate_jai_for_definitions(*sb, p.definitions);
-
-    return builder_to_string(*sb);
-}
-
-
-generate_jai_for_definitions :: (sb: *String_Builder, set: []ProtoDefinition) {
-    for definition : set {
-        generate_jai_for_definitions(sb, definition.subtypes);
-
-        id_name := build_path_up(definition, "_");
-        dotted_name := build_path_up(definition, ".");
-
-        print(sb, "\n");
-        print(sb, "ProtoType_% :: ProtoType.%;\n", id_name, definition.kind);
-
-        generate_jai_free_function(sb, definition, dotted_name);
-
-        if #complete definition.kind == {
-            case .MESSAGE;
-                print(sb, "Serialize :: (output: []u8, index: s64, message: %, field_number := -1, force := false) -> index: s64 {\n", dotted_name);
-                print(sb, "    default: %;\n", dotted_name);
-                print(sb, "    start_index := index;\n");
-
-                // Serialise backwards because the encoder encodes the last bytes first
-                // so it will end up in the normal 'forward' order
-                for < field : definition.fields {
-                    print(sb, "    ");
-                    generate_jai_serialize_field(sb, field, field.repeated, field.required);
-                }
-                for < oneof : definition.one_ofs {
-                    print(sb, "    if message.%_kind == {\n", oneof.name);
-                    for field : oneof.fields {
-                        print(sb, "        case .%1; ", field.name);
-                        generate_jai_serialize_field(sb, field, required=true);
-                    }
-                    print(sb, "    }\n", oneof.name);
-                }
-                print(sb, "    if field_number >= 0 && (force || index != start_index)   index = encode_LEN_from_index(output, index, start_index, field_number);\n");
-                print(sb, "    return index;\n");
-                print(sb, "}\n");
-
-                sbtmp: String_Builder;
-                changed: bool;
-                print(sb, "Parse :: (message: *%, bytes: []u8) -> ok: bool, used: s64 = 0 {\n", dotted_name);
-                print(sb, "    buf := bytes;\n");
-                print(sb, "    while buf {\n");
-                print(sb, "        ok, wire_type, field_number := decode_tag(*buf);\n");
-                print(sb, "        if !ok return false;\n");
-                // Switch over wire's type, so we always advance over any unknown fields, and fields with mismatched types
-                print(sb, "        if wire_type == {\n");
-
-                changed = false;
-                print(sb, "        case .VARINT;\n");
-                print(sb, "            ok=, decoded_value := decode_VARINT(*buf);  if !ok return false;\n");
-                print(*sbtmp, "            if field_number == {\n");
-                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, definition, field, .VARINT, field.repeated);
-                for definition.one_ofs  for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, it, field, .VARINT, false);
-                print(*sbtmp, "            }\n");
-                if changed  append_and_steal_buffers(sb, *sbtmp);
-                reset(*sbtmp);
-
-                changed = false;
-                print(sb, "        case .I32;\n");
-                print(sb, "            ok=, decoded_value := decode_I32(*buf);  if !ok return false;\n");
-                print(*sbtmp, "            decoded_value_float := (*decoded_value).(*float32).*;\n");
-                print(*sbtmp, "            if field_number == {\n");
-                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, definition, field, .I32, field.repeated);
-                for definition.one_ofs  for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, it, field, .I32, false);
-                print(*sbtmp, "            }\n");
-                if changed  append_and_steal_buffers(sb, *sbtmp);
-                reset(*sbtmp);
-
-                changed = false;
-                print(sb, "        case .I64;\n");
-                print(sb, "            ok=, decoded_value := decode_I64(*buf);  if !ok return false;\n");
-                print(*sbtmp, "            decoded_value_float := (*decoded_value).(*float64).*;\n");
-                print(*sbtmp, "            if field_number == {\n");
-                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, definition, field, .I64, field.repeated);
-                for definition.one_ofs  for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, it, field, .I64, false);
-                print(*sbtmp, "            }\n");
-                if changed  append_and_steal_buffers(sb, *sbtmp);
-                reset(*sbtmp);
-
-                changed = false;
-                print(sb, "        case .LEN;\n");
-                print(sb, "            ok=, _, submessage := decode_LEN(*buf);  if !ok return false;\n");
-                print(*sbtmp, "            if field_number == {\n");
-                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, definition, field, .LEN, field.repeated);
-                for definition.one_ofs  for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, it, field, .LEN, false);
-                print(*sbtmp, "            }\n");
-                if changed  append_and_steal_buffers(sb, *sbtmp);
-                reset(*sbtmp);
-
-                print(sb, "        }\n");
-                print(sb, "    }\n");
-                // Messages always use all of the bytes
-                print(sb, "    return true, bytes.count;\n");
-                print(sb, "}\n");
-            case .ENUM;
-                print(sb, "Serialize :: (output: []u8, index: s64, enum_value: %, field_number := -1, force := false) -> index: s64 {\n", dotted_name);
-                print(sb, "    value := cast(u64, enum_value);\n");
-                print(sb, "    if force || value != 0  index = encode_VARINT(output, index, value, field_number);\n");
-                print(sb, "    return index;\n");
-                print(sb, "}\n");
-                print(sb, "Parse :: (enum_value: *%, bytes: []u8) -> ok: bool, used: s64 {\n", dotted_name);
-                print(sb, "    buf := bytes;\n");
-                print(sb, "    ok, value := decode_VARINT(*buf);\n");
-                print(sb, "    if !ok return false, 0;\n");
-                print(sb, "    enum_value.* = xx,no_check value;\n");
-                print(sb, "    used := bytes.count - buf.count;\n");
-                print(sb, "    return true, used;\n");
-                print(sb, "}\n");
-            case .ONE_OF;
-        }
-    }
-}
-
-generate_jai_field :: (sb: *String_Builder, field: ProtoField, indent_level: int) {
-    indent := indent_str(indent_level);
-    if field.map {
-        print(sb, "%0%: Table(%, %)", indent, field.name, jai_type(field.map_key), jai_type(field.map_value));
-    } else if field.repeated {
-        print(sb, "%0%: [..]%", indent, field.name, jai_type(field.type, field.type_name));
-    } else {
-        print(sb, "%0%: %", indent, field.name, jai_type(field.type, field.type_name));
-    }
-    if field.default print(sb, " = %", field.default);
-    print(sb, ";");
-    if field.deprecated print(sb, " @deprecated");
-    if field.optional print(sb, " @optional");
-    if field.required print(sb, " @required");
-    print(sb, "\n");
 }
 
 
@@ -492,9 +502,9 @@ generate_jai_parse_field :: (sb: *String_Builder, definition: ProtoDefinition, f
                             print(sb, " }\n");
                             print(sb, "%table_set(*message.%, key, value);", indent_str, field.name);
                         } else if repeated {
-                            print(sb, "while true { ok=, used := Parse(array_add(*message.%), submessage); if !ok return false; submessage = array_view(submessage, used); if !submessage break; }", field.name);
+                            print(sb, "while true { ok=, used := Deserialize(array_add(*message.%), submessage); if !ok return false; submessage = array_view(submessage, used); if !submessage break; }", field.name);
                         } else {
-                            print(sb, "if !Parse(*message.%, submessage)  return false;", field.name);
+                            print(sb, "if !Deserialize(*message.%, submessage)  return false;", field.name);
                         }
                 }
                 set_kind(sb, definition, field);

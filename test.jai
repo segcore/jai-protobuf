@@ -293,7 +293,7 @@ END;
 
 test_parse :: () {
     p: ProtoFile;
-    p = parse_proto(ProtoBasic1);
+    p = parse_proto_text(ProtoBasic1);
     test_eq(p.edition, "proto3");
     test_eq(p.definitions.count, 1);
     if p.definitions.count {
@@ -312,7 +312,7 @@ Test1 :: struct {
 }
     END));
 
-    p = parse_proto(ProtoCorpus);
+    p = parse_proto_text(ProtoCorpus);
     jai_code = generate_jai(p);
     test_eq(true, contains(jai_code, #string END
 Corpus :: enum {
@@ -336,7 +336,7 @@ SearchRequest :: struct {
     END));
 
 
-    p = parse_proto(ProtoRepeated);
+    p = parse_proto_text(ProtoRepeated);
     jai_code = generate_jai(p);
     test_eq(true, contains(jai_code, #string END
 Point2D :: struct {
@@ -345,7 +345,7 @@ Point2D :: struct {
 }
     END));
 
-    p = parse_proto(#string END
+    p = parse_proto_text(#string END
         // With comments
         /* two kinds
             message X { int32 x = 1; }
@@ -358,7 +358,7 @@ Point2D :: struct {
     test_eq(p.definitions[0].fields[0].name, "y");
 
     // import, package, reserved, and options
-    p = parse_proto(#string END
+    p = parse_proto_text(#string END
         edition = "2023";
         import "dir/other.proto";
         import public "dir/something.proto";
@@ -385,7 +385,7 @@ Point2D :: struct {
     test_eq(p.definitions[0].fields[1].deprecated, true);
 
     // oneof parsing
-    p = parse_proto(#string END
+    p = parse_proto_text(#string END
         message Body {
             float x = 1;
             oneof Appendage {
@@ -410,7 +410,7 @@ Point2D :: struct {
     test_eq(p.definitions[0].one_ofs[0].fields[2].type, .FLOAT);
 
     // Nested Enum parsing
-    p = parse_proto(#string END
+    p = parse_proto_text(#string END
         message M {
             int32 x = 1;
 
@@ -440,7 +440,7 @@ test_generate :: () {
     PRINT_GENERATED_CODE :: 0;
 
     {
-        jai_code :: #run generate_jai(parse_proto(ProtoCorpus));
+        jai_code :: #run generate_jai(parse_proto_text(ProtoCorpus));
         #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
         else {
             #insert jai_code;
@@ -453,7 +453,7 @@ test_generate :: () {
             as_bytes := Serialize(request);
 
             decoded: SearchRequest;
-            Parse(*decoded, as_bytes);
+            Deserialize(*decoded, as_bytes);
             test_eq(decoded.query, request.query);
             test_eq(decoded.page_number, request.page_number);
             test_eq(decoded.results_per_page, request.results_per_page);
@@ -467,7 +467,7 @@ test_generate :: () {
     }
 
     {
-        jai_code :: #run generate_jai(parse_proto(ProtoRepeated));
+        jai_code :: #run generate_jai(parse_proto_text(ProtoRepeated));
         #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
         else {
             #insert jai_code;
@@ -479,7 +479,7 @@ test_generate :: () {
             test_eq(as_bytes, u8.[0x08, 0x01, 0x08, 0x02, 0x08, 0x03, 0x10, 0x09, 0x10, 0x08, 0x10, 0x07]);
 
             decoded: Point2D;
-            Parse(*decoded, as_bytes);
+            Deserialize(*decoded, as_bytes);
             test_eq(decoded.x.([]s32), .[1, 2, 3]);
             test_eq(decoded.y.([]s32), .[9, 8, 7]);
             FreeContents(*decoded);
@@ -487,7 +487,7 @@ test_generate :: () {
     }
 
     {
-        jai_code :: #run generate_jai(parse_proto(ProtoAllTypes));
+        jai_code :: #run generate_jai(parse_proto_text(ProtoAllTypes));
         #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
         else {
             #insert jai_code;
@@ -534,7 +534,7 @@ test_generate :: () {
             as_bytes = Serialize(all_types);
 
             decoded: AllTypes;
-            Parse(*decoded, as_bytes);
+            Deserialize(*decoded, as_bytes);
 
             test_eq(decoded._i32, all_types._i32);
             test_eq(decoded._i64, all_types._i64);
@@ -576,7 +576,7 @@ test_generate :: () {
     }
 
     {
-        jai_code :: #run generate_jai(parse_proto(ProtoOneOf));
+        jai_code :: #run generate_jai(parse_proto_text(ProtoOneOf));
         #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
         else {
             #insert jai_code;
@@ -591,7 +591,7 @@ test_generate :: () {
             as_bytes = Serialize(message);
 
             decoded: OneOf;
-            Parse(*decoded, as_bytes);
+            Deserialize(*decoded, as_bytes);
 
             test_eq(decoded.x, 1234);
             test_eq(decoded.Plant_kind, .twigs);
@@ -601,7 +601,7 @@ test_generate :: () {
     }
 
     {
-        jai_code :: #run generate_jai(parse_proto(#string END
+        jai_code :: #run generate_jai(parse_proto_text(#string END
             message M {
                 int32 x = 1;
 
@@ -630,7 +630,7 @@ test_generate :: () {
             test_eq(as_bytes, u8.[0x08, 0x07, 0x10, 0x01]);
 
             decoded: M;
-            Parse(*decoded, as_bytes);
+            Deserialize(*decoded, as_bytes);
             test_eq(decoded.x, message.x);
             test_eq(decoded.v, message.v);
             FreeContents(*decoded);
@@ -638,7 +638,7 @@ test_generate :: () {
     }
 
     {
-        jai_code :: #run generate_jai(parse_proto(#string END
+        jai_code :: #run generate_jai(parse_proto_text(#string END
             message M {
                 int32 x = 1;
 
@@ -668,7 +668,7 @@ test_generate :: () {
             test_eq(as_bytes, u8.[0x12, 0x04, 0x08, 0x02, 0x10, 0x03]);
 
             decoded: M;
-            Parse(*decoded, as_bytes);
+            Deserialize(*decoded, as_bytes);
             test_eq(decoded.sub.subx, message.sub.subx);
             test_eq(decoded.sub.suby, message.sub.suby);
             FreeContents(*decoded);
@@ -676,7 +676,7 @@ test_generate :: () {
     }
 
     {
-        jai_code :: #run generate_jai(parse_proto(#string END
+        jai_code :: #run generate_jai(parse_proto_text(#string END
             message M {
                 enum MyEnum {
                     v0 = 0;
@@ -703,14 +703,14 @@ test_generate :: () {
             test_eq(as_bytes, u8.[0x0A, 0x02, 0x10, 0x01]);
 
             decoded: M;
-            Parse(*decoded, as_bytes);
+            Deserialize(*decoded, as_bytes);
             test_eq(decoded.sub.evalue, message.sub.evalue);
             FreeContents(*decoded);
         }
     }
 
     {
-        jai_code :: #run generate_jai(parse_proto(#string END
+        jai_code :: #run generate_jai(parse_proto_text(#string END
             message M {
                 enum MyEnum {
                     v0 = 0;
@@ -737,14 +737,14 @@ test_generate :: () {
             test_eq(as_bytes, u8.[0x0A, 0x02, 0x10, 0x01]);
 
             decoded: M;
-            Parse(*decoded, as_bytes);
+            Deserialize(*decoded, as_bytes);
             test_eq(decoded.sub.evalue, message.sub.evalue);
             FreeContents(*decoded);
         }
     }
 
     {
-        jai_code :: #run generate_jai(parse_proto(#string END
+        jai_code :: #run generate_jai(parse_proto_text(#string END
             message M {
                 message Sub {
                     enum MyEnum {
@@ -771,7 +771,7 @@ test_generate :: () {
             test_eq(as_bytes, u8.[0x0A, 0x02, 0x10, 0x01, 0x18, 0x01]);
 
             decoded: M;
-            Parse(*decoded, as_bytes);
+            Deserialize(*decoded, as_bytes);
             test_eq(decoded.sub.evalue, message.sub.evalue);
             test_eq(decoded.xvalue, message.xvalue);
             FreeContents(*decoded);
@@ -779,7 +779,7 @@ test_generate :: () {
     }
 
     {
-        jai_code :: #run generate_jai(parse_proto(#string END
+        jai_code :: #run generate_jai(parse_proto_text(#string END
             message M {
                 message Sub {
                     enum MyEnum {
@@ -806,7 +806,7 @@ test_generate :: () {
             test_eq(as_bytes, u8.[0x0A, 0x02, 0x10, 0x01, 0x18, 0x01]);
 
             decoded: M;
-            Parse(*decoded, as_bytes);
+            Deserialize(*decoded, as_bytes);
             test_eq(decoded.sub.evalue, message.sub.evalue);
             test_eq(decoded.xvalue, message.xvalue);
             FreeContents(*decoded);
@@ -814,7 +814,7 @@ test_generate :: () {
     }
 
     {
-        jai_code :: #run generate_jai(parse_proto(#string END
+        jai_code :: #run generate_jai(parse_proto_text(#string END
             message M {
                 map<string, int32> name_mapping = 1;
                 int32 x = 2;
@@ -838,7 +838,7 @@ test_generate :: () {
             test_eq(as_bytes, u8.[0x0A, 0x09, 0x0A, 0x05, "h", "e", "l", "l", "o", 0x10, 0x0F]);
 
             decoded: M;
-            Parse(*decoded, as_bytes);
+            Deserialize(*decoded, as_bytes);
             found, value := table_find(*decoded.name_mapping, "hello");
             test_eq(found, true);
             test_eq(value, 15);
@@ -856,7 +856,7 @@ test_generate :: () {
 
             // Decode
             decoded = .{};
-            Parse(*decoded, as_bytes);
+            Deserialize(*decoded, as_bytes);
             found, value = table_find(*decoded.name_mapping, "hello");
             test_eq(found, true);
             test_eq(value, 15);
@@ -875,8 +875,7 @@ test_generate_from_file :: () {
     input_path :: "protos.proto";
     output_path :: "generated/protos.jai";
 
-    file_contents := read_entire_file(input_path);
-    resulting_code := generate_jai(parse_proto(file_contents, input_path));
+    resulting_code := generate_jai(parse_proto_file(input_path));
     make_directory_if_it_does_not_exist("generated");
     ok := write_entire_file(output_path, resulting_code);
     test_eq(ok, true);

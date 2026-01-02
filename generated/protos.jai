@@ -53,7 +53,7 @@ Serialize :: (output: []u8, index: s64, enum_value: MyEnum, field_number := -1, 
     if force || value != 0  index = encode_VARINT(output, index, value, field_number);
     return index;
 }
-Parse :: (enum_value: *MyEnum, bytes: []u8) -> ok: bool, used: s64 {
+Deserialize :: (enum_value: *MyEnum, bytes: []u8) -> ok: bool, used: s64 {
     buf := bytes;
     ok, value := decode_VARINT(*buf);
     if !ok return false, 0;
@@ -71,7 +71,7 @@ Serialize :: (output: []u8, index: s64, message: SimpleHolder, field_number := -
     if field_number >= 0 && (force || index != start_index)   index = encode_LEN_from_index(output, index, start_index, field_number);
     return index;
 }
-Parse :: (message: *SimpleHolder, bytes: []u8) -> ok: bool, used: s64 = 0 {
+Deserialize :: (message: *SimpleHolder, bytes: []u8) -> ok: bool, used: s64 = 0 {
     buf := bytes;
     while buf {
         ok, wire_type, field_number := decode_tag(*buf);
@@ -100,7 +100,7 @@ Serialize :: (output: []u8, index: s64, enum_value: ManyThings.SubType, field_nu
     if force || value != 0  index = encode_VARINT(output, index, value, field_number);
     return index;
 }
-Parse :: (enum_value: *ManyThings.SubType, bytes: []u8) -> ok: bool, used: s64 {
+Deserialize :: (enum_value: *ManyThings.SubType, bytes: []u8) -> ok: bool, used: s64 {
     buf := bytes;
     ok, value := decode_VARINT(*buf);
     if !ok return false, 0;
@@ -136,7 +136,7 @@ Serialize :: (output: []u8, index: s64, message: ManyThings, field_number := -1,
     if field_number >= 0 && (force || index != start_index)   index = encode_LEN_from_index(output, index, start_index, field_number);
     return index;
 }
-Parse :: (message: *ManyThings, bytes: []u8) -> ok: bool, used: s64 = 0 {
+Deserialize :: (message: *ManyThings, bytes: []u8) -> ok: bool, used: s64 = 0 {
     buf := bytes;
     while buf {
         ok, wire_type, field_number := decode_tag(*buf);
@@ -163,9 +163,9 @@ Parse :: (message: *ManyThings, bytes: []u8) -> ok: bool, used: s64 = 0 {
         case .LEN;
             ok=, _, submessage := decode_LEN(*buf);  if !ok return false;
             if field_number == {
-            case 1; if !Parse(*message.my_enum, submessage)  return false;
+            case 1; if !Deserialize(*message.my_enum, submessage)  return false;
             case 2; while submessage {ok=, decoded_value := decode_I32_float(*submessage); if !ok return false; array_add(*message.values, decoded_value); }
-            case 4; if !Parse(*message.submessage, submessage)  return false;
+            case 4; if !Deserialize(*message.submessage, submessage)  return false;
             case 5; message.something = copy_string(submessage.(string));
             case 7;  key: string; value: s32; got_key := false; got_value := false; while submessage {
                 ok=, wire_type, field_number := decode_tag(*submessage); if !ok return false;
