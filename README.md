@@ -47,7 +47,7 @@ double up?
   * [x] Unpacked repeated fields
   * [ ] Packed repeated fields - Encode
   * [x] Packed repeated fields - Decode
-* [ ] Map types
+* [x] Map types
 * [x] One-of types
 
 Not intended to be implemented:

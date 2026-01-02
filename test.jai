@@ -533,7 +533,6 @@ test_generate :: () {
             array_add(*all_types.rep_message, .{0.0}, .{1238.1}, .{-51285.12});
             as_bytes = Serialize(all_types);
 
-            print("Serialized all types: % bytes %\n", as_bytes.count, as_bytes);
             decoded: AllTypes;
             Parse(*decoded, as_bytes);
 
@@ -829,7 +828,7 @@ test_generate :: () {
             as_bytes := Serialize(message);
             test_eq(as_bytes, u8.[]);
 
-            table_add(*message.name_mapping, "hello", 15);
+            table_set(*message.name_mapping, "hello", 15);
             as_bytes = Serialize(message);
             // name_mapping is a repeated Message of { key=1; value=2; } on the wire
             // name_mapping[0].key == "hello" -> 000_1'010 0x05 "hello" -> 0x0A 05 "h" "e" "l" "l" "o"
@@ -840,11 +839,33 @@ test_generate :: () {
 
             decoded: M;
             Parse(*decoded, as_bytes);
-            print("%\n", decoded);
             found, value := table_find(*decoded.name_mapping, "hello");
             test_eq(found, true);
             test_eq(value, 15);
             FreeContents(*decoded);
+
+            // Free should remove all
+            found, value = table_find(*decoded.name_mapping, "hello");
+            test_eq(found, false);
+            test_eq(value, 0);
+
+            // Add multiple strings
+            table_set(*message.name_mapping, "beef", 42);
+            table_set(*message.name_mapping, "hawk", 701);
+            as_bytes = Serialize(message);
+
+            // Decode
+            decoded = .{};
+            Parse(*decoded, as_bytes);
+            found, value = table_find(*decoded.name_mapping, "hello");
+            test_eq(found, true);
+            test_eq(value, 15);
+            found, value = table_find(*decoded.name_mapping, "beef");
+            test_eq(found, true);
+            test_eq(value, 42);
+            found, value = table_find(*decoded.name_mapping, "hawk");
+            test_eq(found, true);
+            test_eq(value, 701);
         }
     }
 }

@@ -167,7 +167,13 @@ Parse :: (message: *ManyThings, bytes: []u8) -> ok: bool, used: s64 = 0 {
             case 2; while submessage {ok=, decoded_value := decode_I32_float(*submessage); if !ok return false; array_add(*message.values, decoded_value); }
             case 4; if !Parse(*message.submessage, submessage)  return false;
             case 5; message.something = copy_string(submessage.(string));
-            case 7; /* TODO: maps */
+            case 7;  key: string; value: s32; got_key := false; got_value := false; while submessage {
+                ok=, wire_type, field_number := decode_tag(*submessage); if !ok return false;
+                if field_number == 1 && wire_type == .LEN { got_key=, ptr := decode_string(*submessage); key = copy_string(ptr); }
+                else if field_number == 2 && wire_type == .VARINT { ok=, varint := decode_VARINT(*submessage); got_value, value = ok, xx,no_check varint; }
+                else { ok = decode_skip(*submessage, wire_type); }
+                if !ok return false; }
+                table_set(*message.name_mapping, key, value);
             }
         }
     }

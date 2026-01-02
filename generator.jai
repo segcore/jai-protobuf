@@ -416,7 +416,7 @@ generate_jai_parse_field :: (sb: *String_Builder, definition: ProtoDefinition, f
                 if !known_type  print(sb, "#if ProtoType_% == .ENUM { ", id_name_for(field.type_name,, temp));
                 value_string := ifx should_zigzag(field.type) "unzigzag(decoded_value)" else "decoded_value";
                 if repeated print(sb, "array_add(*message.%, xx,no_check %);", field.name, value_string);
-                else              print(sb, "message.% = xx,no_check %;", field.name, value_string);
+                else        print(sb, "message.% = xx,no_check %;", field.name, value_string);
                 set_kind(sb, definition, field);
                 if !known_type  print(sb, " }");
 
@@ -427,7 +427,7 @@ generate_jai_parse_field :: (sb: *String_Builder, definition: ProtoDefinition, f
             if field_type == .I32 {
                 value_string := ifx field.type == .FLOAT "decoded_value_float" else "decoded_value";
                 if repeated print(sb, "            case %; array_add(*message.%, %);", formatInt(field.field_number), field.name, value_string);
-                else              print(sb, "            case %; message.% = %;",            formatInt(field.field_number), field.name, value_string);
+                else        print(sb, "            case %; message.% = %;",            formatInt(field.field_number), field.name, value_string);
                 set_kind(sb, definition, field);
                 print(sb, "\n");
                 changed = true;
@@ -436,7 +436,7 @@ generate_jai_parse_field :: (sb: *String_Builder, definition: ProtoDefinition, f
             if field_type == .I64 {
                 value_string := ifx field.type == .DOUBLE "decoded_value_float" else "decoded_value";
                 if repeated print(sb, "            case %; array_add(*message.%, %);", formatInt(field.field_number), field.name, value_string);
-                else              print(sb, "            case %; message.% = %;",            formatInt(field.field_number), field.name, value_string);
+                else        print(sb, "            case %; message.% = %;",            formatInt(field.field_number), field.name, value_string);
                 set_kind(sb, definition, field);
                 print(sb, "\n");
                 changed = true;
@@ -447,16 +447,50 @@ generate_jai_parse_field :: (sb: *String_Builder, definition: ProtoDefinition, f
                 if field.type == {
                     case .STRING;
                         if repeated  print(sb, "array_add(*message.%, copy_string(submessage.(string)));", field.name);
-                        else               print(sb, "message.% = copy_string(submessage.(string));", field.name);
+                        else         print(sb, "message.% = copy_string(submessage.(string));", field.name);
                     case .BYTES;
                         if repeated  print(sb, "array_add(*message.%, array_copy(submessage));", field.name);
-                        else               print(sb, "message.% = array_copy(submessage);", field.name);
+                        else         print(sb, "message.% = array_copy(submessage);", field.name);
                     case .MESSAGE;
                         // Could be a repeated enum, or a Message
                         // Messages consume all of the bytes, and repeated enums may not
 
                         if field.map {
-                            print(sb, "/* TODO: maps */");
+                            // Each item is an individual Message with key=1; value=2;
+                            key_proto := proto_type(field.map_key);
+                            value_proto := proto_type(field.map_value);
+                            key_wire := wire_type_for(key_proto);
+                            value_wire := wire_type_for(value_proto);
+                            indent_str := "                ";
+
+                            decode_one :: (sb: *String_Builder, proto: ProtoType, wire: WireType, variable: string) {
+                                if wire == {
+                                    case .VARINT;
+                                        print(sb, "ok=, varint := decode_VARINT(*submessage); ");
+                                        fn := ifx should_zigzag(proto) "unzigzag(varint)" else "varint";
+                                        print(sb, "got_%1, %1 = ok, xx,no_check %2;", variable, fn);
+                                    case .I32;
+                                        fn := ifx proto == .FLOAT "decode_I32_float" else "decode_I32";
+                                        print(sb, "got_%1, %1 = %(*submessage);", variable, fn);
+                                    case .I64;
+                                        fn := ifx proto == .DOUBLE "decode_I64_float" else "decode_I64";
+                                        print(sb, "got_%1, %1 = %(*submessage);", variable, fn);
+                                    case .LEN;
+                                        print(sb, "got_%1=, ptr := decode_string(*submessage); %1 = copy_string(ptr);", variable);
+                                }
+                            }
+
+                            print(sb, " key: %; value: %; got_key := false; got_value := false; ", jai_type(key_proto, ""), jai_type(value_proto, ""));
+                            print(sb, "while submessage {\n");
+                            print(sb, "%ok=, wire_type, field_number := decode_tag(*submessage); if !ok return false;\n", indent_str);
+                            print(sb, "%if field_number == 1 && wire_type == .% { ", indent_str, key_wire);
+                            decode_one(sb, key_proto, key_wire, "key");
+                            print(sb, " }\n%else if field_number == 2 && wire_type == .% { ", indent_str, value_wire);
+                            decode_one(sb, value_proto, value_wire, "value");
+                            print(sb, " }\n%else { ok = decode_skip(*submessage, wire_type); }\n", indent_str);
+                            print(sb, "%if !ok return false;", indent_str);
+                            print(sb, " }\n");
+                            print(sb, "%table_set(*message.%, key, value);", indent_str, field.name);
                         } else if repeated {
                             print(sb, "while true { ok=, used := Parse(array_add(*message.%), submessage); if !ok return false; submessage = array_view(submessage, used); if !submessage break; }", field.name);
                         } else {

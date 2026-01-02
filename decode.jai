@@ -9,6 +9,17 @@ decode_tag :: (buf: *[]u8) -> ok: bool, wire_type: WireType, field_number: int {
     return ok, wire_type, field_number;
 }
 
+decode_skip :: (buf: *[]u8, wire_type: WireType) -> ok: bool {
+    ok: bool = false;
+    if wire_type == {
+        case .VARINT; ok = decode_VARINT(buf);
+        case .LEN; ok = decode_LEN(buf);
+        case .I32; ok = decode_I32(buf);
+        case .I64; ok = decode_I64(buf);
+    }
+    return ok;
+}
+
 decode_VARINT_zigzag :: (buf: *[]u8) -> ok: bool, value: s64 {
     ok, uval := decode_VARINT(buf);
     return ok, unzigzag(uval);
@@ -47,6 +58,12 @@ decode_LEN :: (buf: *[]u8) -> ok: bool, length: s64, submessage: []u8 {
         try_advance(buf, len);
     }
     return ok, len, submessage;
+}
+
+decode_string :: (buf: *[]u8) -> ok: bool, str: string {
+    ok, _, bytes := decode_LEN(buf);
+    str := cast(string)bytes;
+    return ok, str;
 }
 
 decode_I64 :: (buf: *[]u8) -> ok: bool, value: s64 {
