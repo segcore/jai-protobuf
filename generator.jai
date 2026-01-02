@@ -237,7 +237,7 @@ generate_jai_for_definitions :: (sb: *String_Builder, set: []ProtoDefinition) {
                 print(sb, "}\n");
             case .ENUM;
                 print(sb, "Serialize :: (output: []u8, index: s64, enum_value: %, field_number := -1, force := false) -> index: s64 {\n", dotted_name);
-                print(sb, "    value := cast(u64, enum_value);\n");
+                print(sb, "    value := cast,no_check(u64, enum_value);\n");
                 print(sb, "    if force || value != 0  index = encode_VARINT(output, index, value, field_number);\n");
                 print(sb, "    return index;\n");
                 print(sb, "}\n");
@@ -987,10 +987,13 @@ peek :: (p: *Parser) -> Token {
         }
     }
 
-    while str[i] >= "0" && str[i] <= "9" {
+    if str[i] == "-" || (str[i] >= "0" && str[i] <= "9") {
         i += 1;
+        while str[i] >= "0" && str[i] <= "9" {
+            i += 1;
+        }
+        return Token.{kind = .NUMBER, text = slice(str, 0, i)};
     }
-    if i return Token.{kind = .NUMBER, text = slice(str, 0, i)};
 
     while is_alnum(str[i]) || str[i] == "." {
         i += 1;

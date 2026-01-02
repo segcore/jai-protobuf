@@ -49,7 +49,7 @@ Serialize :: (message: $T) -> []u8 {
 ProtoType_MyEnum :: ProtoType.ENUM;
 FreeContents :: inline (message: *MyEnum) {}
 Serialize :: (output: []u8, index: s64, enum_value: MyEnum, field_number := -1, force := false) -> index: s64 {
-    value := cast(u64, enum_value);
+    value := cast,no_check(u64, enum_value);
     if force || value != 0  index = encode_VARINT(output, index, value, field_number);
     return index;
 }
@@ -96,7 +96,7 @@ Deserialize :: (message: *SimpleHolder, bytes: []u8) -> ok: bool, used: s64 = 0 
 ProtoType_ManyThings_SubType :: ProtoType.ENUM;
 FreeContents :: inline (message: *ManyThings.SubType) {}
 Serialize :: (output: []u8, index: s64, enum_value: ManyThings.SubType, field_number := -1, force := false) -> index: s64 {
-    value := cast(u64, enum_value);
+    value := cast,no_check(u64, enum_value);
     if force || value != 0  index = encode_VARINT(output, index, value, field_number);
     return index;
 }
