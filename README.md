@@ -7,7 +7,8 @@ Protobuf is supported at various levels and exposed to the user:
 * code generation (during build) (just #run it!)
 
 Structures and enumerations are generated according to protobuf text descriptions.
-See the [generated example code](./generated/protos.jai).
+See the examples [protobuf description](./examples/many_things.proto) and its
+[generated code](./examples/generated/many_things.proto.jai).
 The generated code is very simple -- structures with public fields and types just
 as a normal structure would be. Repeated fields use `[..]type` and can be used directly.
 Use the language's context features to setup custom allocators.

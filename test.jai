@@ -1,7 +1,8 @@
-#load "module.jai";
-#load "generator.jai";
+#import,dir ".";
 #import "File";
 #import "Hash_Table";
+#import "Basic";
+#import "String";
 
 main :: () {
     context.print_style.default_format_int.base = 16;
@@ -872,18 +873,15 @@ test_generate :: () {
 
 
 test_generate_from_file :: () {
-    input_path :: "protos.proto";
-    output_path :: "generated/protos.jai";
+    input_path :: "examples/many_things.proto";
+    output_path :: ".build/.test_generate_from_file.jai";
 
     resulting_code := generate_jai(parse_proto_file(input_path));
-    make_directory_if_it_does_not_exist("generated");
     ok := write_entire_file(output_path, resulting_code);
     test_eq(ok, true);
     if ok print("Generated %\n", output_path);
     else  print("Failed to generate %\n", output_path);
 }
-
-// #run main();
 
 
 //// --- Testing ---

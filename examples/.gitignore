@@ -1,0 +1,4 @@
+compiletime
+pregenerate
+use_generated
+generated/*

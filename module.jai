@@ -4,6 +4,7 @@
 
 #load "encode.jai";
 #load "decode.jai";
+#load "generator.jai";
 
 LITTLE_ENDIAN :: true;
 

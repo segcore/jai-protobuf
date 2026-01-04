@@ -1,5 +1,8 @@
 // !!! Automatically generated code !!!
-// Generated from protos.proto
+// Generated from many_things.proto
+#import "Hash_Table";
+#import "Basic";
+#import,dir "../..";
 
 MyEnum :: enum {
     MyEnum_A :: 0;
@@ -13,7 +16,7 @@ ManyThings :: struct {
     my_enum: MyEnum;
     values: [..]float32;
     maybe_negative: s32 = 42;
-    submessage: Test1;
+    submessage: SimpleHolder;
     something: string = "hello"; @deprecated
     subtype_value: SubType;
     name_mapping: Table(string, s32);
@@ -35,19 +38,7 @@ ManyThings :: struct {
 }
 
 
-// Serialize any message type into bytes. Allocates memory.
-Serialize :: (message: $T) -> []u8 {
-    buf: []u8;
-    index := Serialize(buf, 0, message);
-    array_resize(*buf, -index, false);
-    index = Serialize(buf, buf.count, message);
-    assert(index == 0, "Current index should be 0 but is %", index);
-    return buf;
-}
-
-
 ProtoType_MyEnum :: ProtoType.ENUM;
-FreeContents :: inline (message: *MyEnum) {}
 Serialize :: (output: []u8, index: s64, enum_value: MyEnum, field_number := -1, force := false) -> index: s64 {
     value := cast,no_check(u64, enum_value);
     if force || value != 0  index = encode_VARINT(output, index, value, field_number);
@@ -61,9 +52,9 @@ Deserialize :: (enum_value: *MyEnum, bytes: []u8) -> ok: bool, used: s64 {
     used := bytes.count - buf.count;
     return true, used;
 }
+FreeContents :: inline (message: *MyEnum) {}
 
 ProtoType_SimpleHolder :: ProtoType.MESSAGE;
-FreeContents :: inline (message: *SimpleHolder) {}
 Serialize :: (output: []u8, index: s64, message: SimpleHolder, field_number := -1, force := false) -> index: s64 {
     default: SimpleHolder;
     start_index := index;
@@ -71,6 +62,7 @@ Serialize :: (output: []u8, index: s64, message: SimpleHolder, field_number := -
     if field_number >= 0 && (force || index != start_index)   index = encode_LEN_from_index(output, index, start_index, field_number);
     return index;
 }
+Serialize :: (message: SimpleHolder) -> []u8 { buf := NewArray(-Serialize(u8.[], 0, message), u8, false); Serialize(buf, buf.count, message); return buf; }
 Deserialize :: (message: *SimpleHolder, bytes: []u8) -> ok: bool, used: s64 = 0 {
     buf := bytes;
     while buf {
@@ -92,9 +84,9 @@ Deserialize :: (message: *SimpleHolder, bytes: []u8) -> ok: bool, used: s64 = 0 
     }
     return true, bytes.count;
 }
+FreeContents :: inline (message: *SimpleHolder) {}
 
 ProtoType_ManyThings_SubType :: ProtoType.ENUM;
-FreeContents :: inline (message: *ManyThings.SubType) {}
 Serialize :: (output: []u8, index: s64, enum_value: ManyThings.SubType, field_number := -1, force := false) -> index: s64 {
     value := cast,no_check(u64, enum_value);
     if force || value != 0  index = encode_VARINT(output, index, value, field_number);
@@ -108,17 +100,9 @@ Deserialize :: (enum_value: *ManyThings.SubType, bytes: []u8) -> ok: bool, used:
     used := bytes.count - buf.count;
     return true, used;
 }
+FreeContents :: inline (message: *ManyThings.SubType) {}
 
 ProtoType_ManyThings :: ProtoType.MESSAGE;
-FreeContents :: (message: *ManyThings) {
-    FreeContents(*message.my_enum);
-    array_reset(*message.values);
-    FreeContents(*message.submessage);
-    free(message.something); message.something = "";
-    FreeContents(*message.subtype_value);
-    for* v, k : message.name_mapping { free(k); }
-    deinit(*message.name_mapping); message.name_mapping = .{};
-}
 Serialize :: (output: []u8, index: s64, message: ManyThings, field_number := -1, force := false) -> index: s64 {
     default: ManyThings;
     start_index := index;
@@ -136,6 +120,7 @@ Serialize :: (output: []u8, index: s64, message: ManyThings, field_number := -1,
     if field_number >= 0 && (force || index != start_index)   index = encode_LEN_from_index(output, index, start_index, field_number);
     return index;
 }
+Serialize :: (message: ManyThings) -> []u8 { buf := NewArray(-Serialize(u8.[], 0, message), u8, false); Serialize(buf, buf.count, message); return buf; }
 Deserialize :: (message: *ManyThings, bytes: []u8) -> ok: bool, used: s64 = 0 {
     buf := bytes;
     while buf {
@@ -147,7 +132,7 @@ Deserialize :: (message: *ManyThings, bytes: []u8) -> ok: bool, used: s64 = 0 {
             if field_number == {
             case 1; #if ProtoType_MyEnum == .ENUM { message.my_enum = xx,no_check decoded_value; }
             case 3; message.maybe_negative = xx,no_check unzigzag(decoded_value);
-            case 4; #if ProtoType_Test1 == .ENUM { message.submessage = xx,no_check decoded_value; }
+            case 4; #if ProtoType_SimpleHolder == .ENUM { message.submessage = xx,no_check decoded_value; }
             case 6; message.subtype_value = xx,no_check decoded_value;
             case 10; message.tree = xx,no_check decoded_value; message.Plant_kind = .tree;
             case 11; message.flowers = xx,no_check decoded_value; message.Plant_kind = .flowers;
@@ -178,4 +163,13 @@ Deserialize :: (message: *ManyThings, bytes: []u8) -> ok: bool, used: s64 = 0 {
         }
     }
     return true, bytes.count;
+}
+FreeContents :: (message: *ManyThings) {
+    FreeContents(*message.my_enum);
+    array_reset(*message.values);
+    FreeContents(*message.submessage);
+    free(message.something); message.something = "";
+    FreeContents(*message.subtype_value);
+    for* v, k : message.name_mapping { free(k); }
+    deinit(*message.name_mapping); message.name_mapping = .{};
 }

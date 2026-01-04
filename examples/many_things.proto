@@ -15,7 +15,7 @@ message ManyThings {
     MyEnum my_enum = 1;
     repeated float values = 2;
     sint32 maybe_negative = 3 [default = 42];
-    Test1 submessage = 4;
+    SimpleHolder submessage = 4;
     string something = 5 [default = "hello", deprecated = true];
 
     oneof Plant {

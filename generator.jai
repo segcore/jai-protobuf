@@ -73,31 +73,31 @@ parse_proto_text :: (data: string, source_path: string = "") -> ProtoFile {
     return out;
 }
 
+// Parse the protobuf description file
 parse_proto_file :: (source_path: string) -> ProtoFile {
     return parse_proto_text(read_entire_file(source_path), source_path);
 }
 
 
-generate_jai :: (p: ProtoFile) -> string {
+// Generate Jai code as a string.
+// protobuf_import: Name of Protobuf module which will be imported within the generated text
+generate_jai :: (p: ProtoFile, protobuf_import := "") -> string {
     sb: String_Builder;
 
     print(*sb, "// !!! Automatically generated code !!!\n");
+
     if p.source_path  print(*sb, "// Generated from %\n", p.source_path);
+    print(*sb, "#import \"Hash_Table\";\n");
+    print(*sb, "#import \"Basic\";\n");
+    if protobuf_import {
+        if wildcard_match(protobuf_import, "[./]*") print(*sb, "#import,dir \"%\";\n", protobuf_import);
+        else print(*sb, "#import \"%\";\n", protobuf_import);
+    }
     print(*sb, "\n");
 
     for p.definitions  generate_definition(*sb, it); 
 
-    print(*sb, "\n\n");
-
-    print(*sb, "// Serialize any message type into bytes. Allocates memory.\n");
-    print(*sb, "Serialize :: (message: $T) -> []u8 {\n");
-    print(*sb, "    buf: []u8;\n");
-    print(*sb, "    index := Serialize(buf, 0, message);\n");
-    print(*sb, "    array_resize(*buf, -index, false);\n");
-    print(*sb, "    index = Serialize(buf, buf.count, message);\n");
-    print(*sb, "    assert(index == 0, \"Current index should be 0 but is \%\", index);\n");
-    print(*sb, "    return buf;\n");
-    print(*sb, "}\n\n");
+    print(*sb, "\n");
 
     generate_jai_for_definitions(*sb, p.definitions);
 
@@ -152,8 +152,6 @@ generate_jai_for_definitions :: (sb: *String_Builder, set: []ProtoDefinition) {
         print(sb, "\n");
         print(sb, "ProtoType_% :: ProtoType.%;\n", id_name, definition.kind);
 
-        generate_jai_free_function(sb, definition, dotted_name);
-
         if #complete definition.kind == {
             case .MESSAGE;
                 print(sb, "Serialize :: (output: []u8, index: s64, message: %, field_number := -1, force := false) -> index: s64 {\n", dotted_name);
@@ -177,6 +175,7 @@ generate_jai_for_definitions :: (sb: *String_Builder, set: []ProtoDefinition) {
                 print(sb, "    if field_number >= 0 && (force || index != start_index)   index = encode_LEN_from_index(output, index, start_index, field_number);\n");
                 print(sb, "    return index;\n");
                 print(sb, "}\n");
+                print(sb, "Serialize :: (message: %) -> []u8 { buf := NewArray(-Serialize(u8.[], 0, message), u8, false); Serialize(buf, buf.count, message); return buf; }\n", dotted_name);
 
                 sbtmp: String_Builder;
                 changed: bool;
@@ -251,6 +250,8 @@ generate_jai_for_definitions :: (sb: *String_Builder, set: []ProtoDefinition) {
                 print(sb, "}\n");
             case .ONE_OF;
         }
+
+        generate_jai_free_function(sb, definition, dotted_name);
     }
 }
 
@@ -754,7 +755,12 @@ parse_enum :: (p: *Parser, output_array: *[..]ProtoDefinition, parent: *ProtoDef
             break;
         }
         if t.kind == .ID {
-            parse_field(p, definition);
+            if t.text == {
+                case "option";
+                    while t.kind != .SEMICOLON && t.kind != .EOF { t = next(p); }
+                case;
+                    parse_field(p, definition);
+            }
         } else {
             log("Unknown item in enum: %", t);
             next(p);
@@ -779,6 +785,9 @@ parse_message_fields :: (p: *Parser, definition: *ProtoDefinition) -> ok: bool {
             case "oneof";    parse_oneof(p, definition);
             case "message";  next(p); parse_message(p, *definition.subtypes, definition);
             case "enum";     next(p); parse_enum(p, *definition.subtypes, definition);
+            case "extensions"; #through;
+            case "option";
+                while t.kind != .SEMICOLON && t.kind != .EOF { t = next(p); }
             case;
                 parse_field(p, definition);
             }
@@ -1059,3 +1068,4 @@ Token :: struct {
 
 #import "String";
 #import "Basic";
+#import "File";
