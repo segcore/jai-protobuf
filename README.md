@@ -45,6 +45,32 @@ jai_code : string = generate_jai(parse_proto_file("person.proto"));
 #insert #run generate_jai(parse_proto_file("person.proto"));
 ```
 
+## Quick start
+
+In your projects directory, add this repo as a module. Jai automatically looks
+in ./modules/ for modules, so that's a good place to put it. If you use git,
+you can submodule it, or otherwise copy it in there.
+
+```sh
+git init
+git submodule add https://github.com/segcore/jai-protobuf.git  modules/Protobuf
+```
+
+```jai
+// file: main.jai
+#import "Basic";
+#import "Protobuf";
+
+#insert #run generate_jai(parse_proto_file("modules/Protobuf/examples/some_things.proto"));
+
+main :: () {
+    group: Group;
+    group.group_name = "Players";
+    array_add(*group.people, .{name = "Bob", age = 42, height_cm = 169.4});
+    print("group: %   bytes: %\n", group, Serialize(group));
+}
+```
+
 ## API
 
 The main parsing and code generation is in `generator.jai`, which has:
