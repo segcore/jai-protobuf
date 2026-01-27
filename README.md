@@ -127,7 +127,7 @@ double up?
   * [x] Basic
   * [x] Nested messages/enums
   * [x] comments (ignored)
-  * [x] import (ignored)
+  * [x] import (passed to user)
   * [x] package (passed to user)
   * [x] reserved fields (ignored)
   * [x] options

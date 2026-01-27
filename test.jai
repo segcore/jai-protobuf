@@ -374,6 +374,9 @@ Point2D :: struct {
         }
     END);
     test_eq(p.edition, "2023");
+    test_eq(p.imports.count, 2);
+    test_eq(p.imports[0], "dir/other.proto");
+    test_eq(p.imports[1], "dir/something.proto");
     test_eq(p.package, "testies.two");
     test_eq(p.definitions.count, 1);
     test_eq(p.definitions[0].name, "Test");

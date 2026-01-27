@@ -11,6 +11,7 @@ ProtoFile :: struct {
     package: string; // Namespacing package, if found
     definitions: [..]ProtoDefinition;
     options: [..]ProtoOption;
+    imports: [..]string;
 }
 
 ProtoDefinition :: struct {
@@ -619,7 +620,8 @@ parse_primary :: (p: *Parser, out: *ProtoFile) -> keep_going: bool {
             if !ok return true;
             out.edition = str;
         case "import";
-            ok = parse_import(p);
+            ok=, path := parse_import(p);
+            if ok array_add(*out.imports, path);
         case "option";
             ok=, option := parse_option(p);
         case "package";
@@ -680,7 +682,7 @@ parse_field_option :: (p: *Parser) -> ok:bool, option: ProtoOption {
     return true, option;
 }
 
-parse_import :: (p: *Parser) -> ok: bool {
+parse_import :: (p: *Parser) -> ok: bool, path: string {
     // Called after "import" is popped
     t: Token;
     t = next(p);
@@ -688,12 +690,13 @@ parse_import :: (p: *Parser) -> ok: bool {
         if t.text == "public" {
             t = next(p);
         }
-        else return false;
+        else return false, "";
     }
-    if t.kind != .STRING return false;
+    if t.kind != .STRING return false, "";
+    path := t.value;
     t = next(p);
-    if t.kind != .SEMICOLON return false;
-    return true;
+    if t.kind != .SEMICOLON return false, path;
+    return true, path;
 }
 
 parse_reserved :: (p: *Parser, definition: *ProtoDefinition) -> ok: bool {
