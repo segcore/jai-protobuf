@@ -1,7 +1,7 @@
 .build/
 test
 
-examples/compiletime
-examples/pregenerate
-examples/use_generated
+examples/*
+!examples/*.jai
+!examples/*/**
 examples/generated/*

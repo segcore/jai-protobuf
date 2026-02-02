@@ -1,9 +1,11 @@
 /*
- * Example: insert Protobuf-generated code during compilation, and use it immediately.
+ * Example: Use pre-generated code.
+ * Must compile and run pregenerate.jai before this program for it to work.
  *
- * Usage:
- *   jai compiletime.jai
- *   ./compiletime
+ * First time and when protobuf schemas or pregenerate.jai are modified:
+ *   jai 02a-pregenerate.jai; ./02a-pregenerate; jai 02b-use_generated.jai
+ * Subsequent:
+ *   jai 02b-use_generated.jai
  */
 
 /*
@@ -13,10 +15,8 @@
 // #import "Protobuf";
 #import,dir "..";
 
-// Insert the generated code.
-// See .build/.added_strings_w2.jai
-#insert #run generate_jai(parse_proto_file("some_things.proto"));
-#insert #run generate_jai(parse_proto_file("many_things.proto"));
+#import,file "generated/some_things.proto.jai";
+#import,file "generated/many_things.proto.jai";
 
 main :: () {
     group: Group;

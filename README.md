@@ -61,7 +61,7 @@ git submodule add https://github.com/segcore/jai-protobuf.git  modules/Protobuf
 #import "Basic";
 #import "Protobuf";
 
-#insert #run generate_jai(parse_proto_file("modules/Protobuf/examples/some_things.proto"));
+#insert #run generate_jai_for_all(.["modules/Protobuf/examples/protos/some_things.proto"]);
 
 main :: () {
     group: Group;
@@ -79,6 +79,9 @@ The main parsing and code generation is in `generator.jai`, which has:
 parse_proto_text :: (data: string, source_path: string = "") -> ProtoFile {...}
 parse_proto_file :: (source_path: string) -> ProtoFile {...}
 generate_jai :: (p: ProtoFile, protobuf_import := "") -> string {...}
+generate_jai_for_all :: (input_protos: []string, 
+                         import_dirs: []string = .[], protobuf_import := "")
+           -> jai: string, failed_imports: []string { ... }
 ```
 
 Primitive encode and decode functions are available in respective files. This

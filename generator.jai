@@ -71,6 +71,13 @@ parse_proto_text :: (data: string, source_path: string = "") -> ProtoFile {
     while parse_primary(*p, *out) {
     }
 
+    logging_source_path := ifx source_path then source_path else "-";
+    if !data {
+        log("Parsing an empty protobuf text from %", logging_source_path, flags=.WARNING);
+    } else if out.definitions.count == 0 {
+        log("No definitions found when parsing %", logging_source_path, flags=.WARNING);
+    }
+
     return out;
 }
 
@@ -83,6 +90,8 @@ parse_proto_file :: (source_path: string) -> ProtoFile {
 // Generate Jai code as a string.
 // protobuf_import: Name of Protobuf module which will be imported within the generated text
 generate_jai :: (p: ProtoFile, protobuf_import := "") -> string {
+    if !p.definitions return "";
+
     sb: String_Builder;
 
     print(*sb, "// !!! Automatically generated code !!!\n");
@@ -105,9 +114,75 @@ generate_jai :: (p: ProtoFile, protobuf_import := "") -> string {
     return builder_to_string(*sb);
 }
 
+// Generate Jai code for all files given, searching in given import directories.
+generate_jai_for_all :: (input_protos: []string, import_dirs: []string = .[], protobuf_import := "") -> jai: string, failed_imports: []string {
+    imported_protos: [..]string;
+    defer array_free(imported_protos);
+    array_add(*imported_protos, ..input_protos);
+
+    failed_imports: [..]string;
+    code_builder: String_Builder;
+
+    for input_path : input_protos {
+        proto_file := parse_proto_file(input_path);
+        code := generate_jai(proto_file, protobuf_import=protobuf_import);
+        if !code {
+            array_add(*failed_imports, input_path);
+            log("Failed to find input proto file '%'", input_path, flags=.WARNING);
+            continue;
+        }
+
+        append(*code_builder, code);
+
+        for import : proto_file.imports {
+            import_recursive(*code_builder, import, import_dirs, protobuf_import, *imported_protos, *failed_imports);
+        }
+    }
+
+    jai := builder_to_string(*code_builder);
+    return jai, failed_imports;
+}
+
+
 // -------------
 // You probably won't need functions below here.
 // -------------
+
+import_recursive :: (code_builder: *String_Builder, import_path: string, import_dirs: []string, protobuf_import: string, imported_protos: *[..]string, failed_imports: *[..]string) {
+    found_this_import := false;
+    for search_dir : import_dirs {
+        full_import_path: string;
+        if search_dir {
+            full_import_path = sprint("%/%", search_dir, import_path,, temp);
+        } else {
+            full_import_path = import_path;
+        }
+
+        // Don't reimport the same files over and over
+        if !array_find(imported_protos.*, full_import_path) {
+            contents, ok := read_entire_file(full_import_path);
+            if ok {
+                log("Generating code for import '%'", import_path);
+                import_proto_file := parse_proto_text(contents);
+                code := generate_jai(import_proto_file, protobuf_import=protobuf_import);
+                append(code_builder, code);
+                array_add(imported_protos, full_import_path);
+                found_this_import = true;
+
+                for subimport : import_proto_file.imports {
+                    import_recursive(code_builder, subimport, import_dirs, protobuf_import, imported_protos, failed_imports);
+                }
+                break;
+            }
+        }
+    }
+
+    if !found_this_import {
+        array_add(failed_imports, import_path);
+        log("Failed to find an import path for '%'", import_path, flags=.WARNING);
+    }
+}
+
 
 generate_definition :: (sb: *String_Builder, definition: ProtoDefinition, indent_level := 0) {
     indent := indent_str(indent_level);

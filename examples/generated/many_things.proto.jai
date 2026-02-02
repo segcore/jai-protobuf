@@ -1,5 +1,5 @@
 // !!! Automatically generated code !!!
-// Generated from many_things.proto
+// Generated from protos/many_things.proto
 #import "Hash_Table";
 #import "Basic";
 #import,dir "../..";

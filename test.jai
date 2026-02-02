@@ -876,7 +876,7 @@ test_generate :: () {
 
 
 test_generate_from_file :: () {
-    input_path :: "examples/many_things.proto";
+    input_path :: "examples/protos/many_things.proto";
     output_path :: ".build/.test_generate_from_file.jai";
 
     resulting_code := generate_jai(parse_proto_file(input_path));

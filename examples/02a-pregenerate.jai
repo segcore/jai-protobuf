@@ -23,7 +23,8 @@ main :: () {
     error := false;
     make_directory_if_it_does_not_exist("generated");
     for src : protos {
-        code := generate_jai(parse_proto_file(src), GENERATED_FILE_IMPORT_PATH);
+        path := sprint("protos/%", src);
+        code := generate_jai(parse_proto_file(path), GENERATED_FILE_IMPORT_PATH);
 
         outpath := tprint("generated/%.jai", src);
         ok := write_entire_file(outpath, code);
