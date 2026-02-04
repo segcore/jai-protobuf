@@ -15,8 +15,7 @@
 // #import "Protobuf";
 #import,dir "..";
 
-#import,file "generated/some_things.proto.jai";
-#import,file "generated/many_things.proto.jai";
+#load "generated/protobuf_definitions.jai";
 
 main :: () {
     group: Group;
@@ -28,7 +27,7 @@ main :: () {
 
     // Serialize to bytes. Allocates. Consider using ,,temp
     bytes := Serialize(group);
-    defer array_free(bytes);
+    defer array_reset(*bytes);
     print("  Encoded as bytes: %\n", bytes);
 
     // Send over a socket, or write to file, ...

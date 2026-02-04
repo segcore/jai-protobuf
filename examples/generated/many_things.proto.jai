@@ -1,8 +1,7 @@
 // !!! Automatically generated code !!!
-// Generated from protos/many_things.proto
+// Generated from examples/protos/many_things.proto
 #import "Hash_Table";
 #import "Basic";
-#import,dir "../..";
 
 MyEnum :: enum {
     MyEnum_A :: 0;

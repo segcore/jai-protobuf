@@ -12,29 +12,23 @@
 // #import "Protobuf";
 #import,dir "..";
 
-GENERATED_FILE_IMPORT_PATH :: "../..";
-
 main :: () {
-    protos := string.[
-        "some_things.proto",
-        "many_things.proto",
+    protos :: string.[
+        "protos/some_things.proto",
     ];
 
-    error := false;
+    outpath :: "generated/protobuf_definitions.jai";
     make_directory_if_it_does_not_exist("generated");
-    for src : protos {
-        path := sprint("protos/%", src);
-        code := generate_jai(parse_proto_file(path), GENERATED_FILE_IMPORT_PATH);
 
-        outpath := tprint("generated/%.jai", src);
-        ok := write_entire_file(outpath, code);
+    jai, failed_imports := generate_jai(protos);
+    ok := write_entire_file(outpath, jai);
 
-        if ok print("Generated '%'\n", outpath);
-        else  print("Failed to write file '%'\n", outpath);
-        error ||= !ok;
-    }
+    if ok print("Generated '%'\n", outpath);
+    else  print("Failed to write file '%'\n", outpath);
 
-    if error exit(1);
+    if failed_imports  print("Failed to import %\n", failed_imports);
+    ok = ok && !failed_imports;
+    if !ok  exit(1);
 }
 
 #import "Basic";

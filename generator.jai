@@ -14,6 +14,18 @@ ProtoFile :: struct {
     imports: [..]string;
 }
 
+ProtoFileSet :: struct {
+    imported_protos: [..]string;
+    failed_imports: [..]string;
+    root: ProtoFileTree;
+}
+
+ProtoFileTree :: struct {
+    package: string;
+    merged_package: ProtoFile;
+    children: [..]ProtoFileTree;
+}
+
 ProtoDefinition :: struct {
     kind : ProtoDefinitionKind;
     name: string;
@@ -62,30 +74,62 @@ ProtoOption :: struct {
 
 INDENT :: 4;
 
-parse_proto_text :: (data: string, source_path: string = "") -> ProtoFile {
+parse_proto_text :: (data: string, source_path: string = "") -> ProtoFile, ok: bool {
     out: ProtoFile;
     out.source_path = source_path;
     p: Parser;
     p.text = data;
 
+    ok := false;
     while parse_primary(*p, *out) {
+        ok = true;
     }
 
     logging_source_path := ifx source_path then source_path else "-";
     if !data {
         log("Parsing an empty protobuf text from %", logging_source_path, flags=.WARNING);
+        ok = false;
     } else if out.definitions.count == 0 {
         log("No definitions found when parsing %", logging_source_path, flags=.WARNING);
     }
 
-    return out;
+    return out, ok;
 }
 
 // Parse the protobuf description file
-parse_proto_file :: (source_path: string) -> ProtoFile {
-    return parse_proto_text(read_entire_file(source_path), source_path);
+parse_proto_file :: (source_path: string) -> ProtoFile, ok: bool {
+    proto_file, ok := parse_proto_text(read_entire_file(source_path), source_path);
+    return proto_file, ok;
 }
 
+parse_proto_files :: (input_protos: []string, search_dirs: []string = .[""]) -> ProtoFileSet, ok: bool {
+    set: ProtoFileSet;
+    ok := parse_proto_files_set(*set, input_protos, search_dirs);
+    return set, ok;
+}
+
+// Generate Jai code for all files given, searching in given import directories.
+generate_jai :: (input_protos: []string, search_dirs: []string = .[""], protobuf_import := "") -> jai: string, failed_imports: []string {
+    jai, failed_imports := generate_jai(*parse_proto_files(input_protos, search_dirs), protobuf_import=protobuf_import);
+    return jai, failed_imports;
+}
+
+// Generate Jai code for the file set
+generate_jai :: (set: *ProtoFileSet, protobuf_import := "") -> jai: string, failed_imports: []string {
+    code_builder: String_Builder;
+
+    generate_recursive :: (sb: *String_Builder, node: ProtoFileTree, protobuf_import: string) {
+        mangle(*node.merged_package);
+        code := generate_jai(node.merged_package, protobuf_import=protobuf_import);
+        append(sb, code);
+        for node.children generate_recursive(sb, it, protobuf_import);
+    }
+
+    generate_recursive(*code_builder, set.root, protobuf_import);
+
+    jai := builder_to_string(*code_builder);
+    return jai, set.failed_imports;
+}
 
 // Generate Jai code as a string.
 // protobuf_import: Name of Protobuf module which will be imported within the generated text
@@ -105,42 +149,16 @@ generate_jai :: (p: ProtoFile, protobuf_import := "") -> string {
     }
     print(*sb, "\n");
 
-    for p.definitions  generate_definition(*sb, it); 
+    packages := ifx contains(p.package, ".") then split(p.package, ".",, temp) else .[p.package];
+    for packages if it print(*sb, "% :: struct { // package namespace\n", it);
+    for p.definitions  generate_definition(*sb, it, p.package); 
+    for<packages if it print(*sb, "} // package namespace: %\n", it);
 
     print(*sb, "\n");
 
-    generate_jai_for_definitions(*sb, p.definitions);
+    generate_jai_for_definitions(*sb, p.definitions, p.package);
 
     return builder_to_string(*sb);
-}
-
-// Generate Jai code for all files given, searching in given import directories.
-generate_jai_for_all :: (input_protos: []string, import_dirs: []string = .[], protobuf_import := "") -> jai: string, failed_imports: []string {
-    imported_protos: [..]string;
-    defer array_free(imported_protos);
-    array_add(*imported_protos, ..input_protos);
-
-    failed_imports: [..]string;
-    code_builder: String_Builder;
-
-    for input_path : input_protos {
-        proto_file := parse_proto_file(input_path);
-        code := generate_jai(proto_file, protobuf_import=protobuf_import);
-        if !code {
-            array_add(*failed_imports, input_path);
-            log("Failed to find input proto file '%'", input_path, flags=.WARNING);
-            continue;
-        }
-
-        append(*code_builder, code);
-
-        for import : proto_file.imports {
-            import_recursive(*code_builder, import, import_dirs, protobuf_import, *imported_protos, *failed_imports);
-        }
-    }
-
-    jai := builder_to_string(*code_builder);
-    return jai, failed_imports;
 }
 
 
@@ -148,53 +166,148 @@ generate_jai_for_all :: (input_protos: []string, import_dirs: []string = .[], pr
 // You probably won't need functions below here.
 // -------------
 
-import_recursive :: (code_builder: *String_Builder, import_path: string, import_dirs: []string, protobuf_import: string, imported_protos: *[..]string, failed_imports: *[..]string) {
-    found_this_import := false;
-    for search_dir : import_dirs {
-        full_import_path: string;
-        if search_dir {
-            full_import_path = sprint("%/%", search_dir, import_path,, temp);
-        } else {
-            full_import_path = import_path;
+reset :: (set: *ProtoFileSet) {
+    array_reset(*set.imported_protos);
+    array_reset(*set.failed_imports);
+}
+
+parse_proto_files_set :: (set: *ProtoFileSet, input_protos: []string, search_dirs: []string = string.[""]) -> ok: bool {
+    found_something := false;
+
+    for input_path : input_protos {
+        for search_dir : search_dirs {
+            full_import_path: string;
+            if search_dir {
+                full_import_path = sprint("%/%", search_dir, input_path,, temp);
+            } else {
+                full_import_path = input_path;
+            }
+            log("Search for % at %\n", input_path, full_import_path, flags = .VERBOSE_ONLY);
+
+            // Don't reimport the same files over and over
+            if array_find(set.imported_protos, full_import_path) {
+                continue input_path;
+            }
+
+            // Accept the import if the file exists, even if the file is empty
+            no_logger :: (message: string, data: *void, info: Log_Info) {}
+            contents, ok := read_entire_file(full_import_path,, logger=no_logger);
+            if ok {
+                log("Parsing protobuf file '%'", full_import_path);
+                proto_file := parse_proto_text(contents, input_path);
+
+                array_add(*set.imported_protos, full_import_path);
+                found_something = true;
+
+                add_proto_tree_file(set, proto_file);
+                parse_proto_files_set(set, proto_file.imports, search_dirs);
+                continue input_path;
+            }
         }
 
-        // Don't reimport the same files over and over
-        if !array_find(imported_protos.*, full_import_path) {
-            contents, ok := read_entire_file(full_import_path);
-            if ok {
-                log("Generating code for import '%'", import_path);
-                import_proto_file := parse_proto_text(contents);
-                code := generate_jai(import_proto_file, protobuf_import=protobuf_import);
-                append(code_builder, code);
-                array_add(imported_protos, full_import_path);
-                found_this_import = true;
+        // If we reach here, we've failed to import it
+        array_add(*set.failed_imports, input_path);
+        log("Failed to find an import path for '%'", input_path, flags=.WARNING);
+    }
 
-                for subimport : import_proto_file.imports {
-                    import_recursive(code_builder, subimport, import_dirs, protobuf_import, imported_protos, failed_imports);
-                }
+    return found_something;
+}
+
+add_proto_tree_file :: (set: *ProtoFileSet, proto_file: ProtoFile) {
+    node := *set.root;
+    package := proto_file.package;
+    while package {
+        found, left, right := split_from_left(package, ".");
+        child: *ProtoFileTree;
+        for* node.children {
+            if it.package == left {
+                child = it;
                 break;
             }
         }
+        if !child {
+            child = array_add(*node.children);
+            child.package = left;
+        }
+        node = child;
+        package = right;
     }
 
-    if !found_this_import {
-        array_add(failed_imports, import_path);
-        log("Failed to find an import path for '%'", import_path, flags=.WARNING);
+    merge_proto_files(*node.merged_package, proto_file);
+}
+
+merge_proto_files :: (destination: *ProtoFile, source: ProtoFile) {
+    if destination.source_path && source.source_path
+        destination.source_path = join(destination.source_path, source.source_path, separator=", ",, temp);
+    else if source.source_path  destination.source_path = source.source_path;
+    destination.package = source.package;
+    array_add(*destination.definitions, ..source.definitions);
+    array_add(*destination.options, ..source.options);
+    array_add(*destination.imports, ..source.imports);
+}
+
+// Mangles any name to avoid Jai keywords and builtins
+// Input name may include ".", then each token will be mangled independently and recombined
+mangle :: (name: string) -> string {
+    mangled_name := name;
+    reserved :: string.[
+        "Any",
+    ];
+
+    // Try to avoid allocations
+    needs_mangle := false;
+
+    section := name;
+    while section {
+        found, left, right := split_from_left(section, ".");
+        if array_find(reserved, left) {
+            needs_mangle = true;
+            break;
+        }
+        section = right;
+    }
+
+    if needs_mangle {
+        sb: String_Builder;
+        section := name;
+        while section {
+            found, left, right := split_from_left(section, ".");
+            append(*sb, left);
+            if array_find(reserved, left) {
+                append(*sb, "_");
+            }
+            if right append(*sb, ".");
+            section = right;
+        }
+        mangled_name = builder_to_string(*sb);
+    }
+    return mangled_name;
+}
+
+mangle :: (proto_file: *ProtoFile) {
+    for* definition: proto_file.definitions {
+        definition.name = mangle(definition.name);
+        for* field : definition.fields {
+            field.name = mangle(field.name);
+            field.type_name = mangle(field.type_name);
+        }
     }
 }
 
-
-generate_definition :: (sb: *String_Builder, definition: ProtoDefinition, indent_level := 0) {
+generate_definition :: (sb: *String_Builder, definition: ProtoDefinition, package: string, indent_level := 0) {
     indent := indent_str(indent_level);
+    name := mangle(definition.name);
     if #complete definition.kind == {
         case .MESSAGE;
-            print(sb, "%0% :: struct {\n", indent, definition.name);
+            print(sb, "%0% :: struct {", indent, name);
+            if package  print(sb, " // %.%", package, name);
+            print(sb, "\n", indent, name);
             for definition.fields    generate_jai_field(sb, it, indent_level + 1);
-            for definition.one_ofs   generate_definition(sb, it, indent_level + 1);
-            for definition.subtypes  generate_definition(sb, it, indent_level + 1);
+            for definition.one_ofs   generate_definition(sb, it, package, indent_level + 1);
+            for definition.subtypes  generate_definition(sb, it, package, indent_level + 1);
             print(sb, "%}\n", indent);
         case .ENUM;
-            print(sb, "%0% :: enum {\n", indent, definition.name);
+            print(sb, "%0% :: enum {\n", indent, name);
             for field : definition.fields {
                 print(sb, "%    % :: %;\n", indent, field.name, formatInt(field.field_number, base=10));
             }
@@ -202,28 +315,28 @@ generate_definition :: (sb: *String_Builder, definition: ProtoDefinition, indent
         case .ONE_OF;
             indent := indent_str(indent_level);
             // Generate Enum for Kind
-            print(sb, "%0%_Kind :: enum {\n", indent, definition.name);
-            print(sb, "%    _UNSET;\n", indent, definition.name);
+            print(sb, "%0%_Kind :: enum {\n", indent, name);
+            print(sb, "%    _UNSET;\n", indent, name);
             for field : definition.fields {
                 print(sb, "%    %;\n", indent, field.name);
             }
             print(sb, "%}\n", indent);
-            print(sb, "%0%2_kind: %2_Kind;\n", indent, definition.name);
+            print(sb, "%0%2_kind: %2_Kind;\n", indent, name);
 
             // Generate fields
-            print(sb, "%using % : union {\n", indent, definition.name);
+            print(sb, "%using % : union {\n", indent, name);
             for definition.fields  generate_jai_field(sb, it, indent_level + 1);
-            print(sb, "%}\n", indent, definition.name);
+            print(sb, "%}\n", indent, name);
     }
 }
 
 
-generate_jai_for_definitions :: (sb: *String_Builder, set: []ProtoDefinition) {
+generate_jai_for_definitions :: (sb: *String_Builder, set: []ProtoDefinition, package: string) {
     for definition : set {
-        generate_jai_for_definitions(sb, definition.subtypes);
+        generate_jai_for_definitions(sb, definition.subtypes, package);
 
-        id_name := build_path_up(definition, "_");
-        dotted_name := build_path_up(definition, ".");
+        id_name := build_path_up(package, definition, "_");
+        dotted_name := build_path_up(package, definition, ".");
 
         print(sb, "\n");
         print(sb, "ProtoType_% :: ProtoType.%;\n", id_name, definition.kind);
@@ -653,18 +766,25 @@ id_name_for :: (name: string) -> string {
 }
 
 
-build_path_up :: (definition: ProtoDefinition, separator: string) -> string {
-    if !definition.parent  return definition.name;
+build_path_up :: (package: string, definition: ProtoDefinition, separator: string) -> string {
+    if !package && !definition.parent  return definition.name;
 
-    build :: (tmp: *String_Builder, definition: ProtoDefinition, separator: string) {
-        if definition.parent  build(tmp, definition.parent, separator);
+    build :: (tmp: *String_Builder, package: string, definition: ProtoDefinition, separator: string) {
+        if definition.parent  build(tmp, package, definition.parent, separator);
         if builder_string_length(tmp)  append(tmp, separator);
-        append(tmp, definition.name);
+        name := mangle(definition.name);
+        append(tmp, name);
     }
 
     tmp: String_Builder;
     init_string_builder(*tmp,, temp);
-    build(*tmp, definition, separator);
+    for split(package, ".",, temp) {
+        if it {
+            if builder_string_length(*tmp)  append(*tmp, separator);
+            append(*tmp, it);
+        }
+    }
+    build(*tmp, package, definition, separator);
     return builder_to_string(*tmp);
 }
 

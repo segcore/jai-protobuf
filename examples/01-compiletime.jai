@@ -15,10 +15,7 @@
 
 // Insert the generated code.
 // See .build/.added_strings_w2.jai
-#insert #run generate_jai_for_all(.[
-    "protos/some_things.proto",
-    "protos/many_things.proto"
-]);
+#insert #run generate_jai(.["protos/some_things.proto"]);
 
 main :: () {
     group: Group;
@@ -30,7 +27,7 @@ main :: () {
 
     // Serialize to bytes. Allocates. Consider using ,,temp
     bytes := Serialize(group);
-    defer array_free(bytes);
+    defer array_reset(*bytes);
     print("  Encoded as bytes: %\n", bytes);
 
     // Send over a socket, or write to file, ...

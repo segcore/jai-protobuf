@@ -877,7 +877,8 @@ test_generate :: () {
 
 test_generate_from_file :: () {
     input_path :: "examples/protos/many_things.proto";
-    output_path :: ".build/.test_generate_from_file.jai";
+    output_path :: "examples/generated/many_things.proto.jai";
+    make_directory_if_it_does_not_exist("examples/generated");
 
     resulting_code := generate_jai(parse_proto_file(input_path));
     ok := write_entire_file(output_path, resulting_code);
