@@ -872,6 +872,44 @@ test_generate :: () {
             test_eq(value, 701);
         }
     }
+
+    {
+        jai_code :: #run generate_jai(parse_proto_text(#string END
+            message Struct {
+                map<string, Value> fields = 1;
+            }
+            message Value {
+                int32 x = 4;
+            }
+        END));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        else {
+            #insert jai_code;
+
+            message: Struct;
+            as_bytes := Serialize(message);
+            test_eq(as_bytes, u8.[]);
+
+            table_set(*message.fields, "hello", Value.{15});
+            as_bytes = Serialize(message);
+            // name_mapping is a repeated Message of { key=1; value=2; } on the wire
+            // name_mapping[0].key == "hello" -> 000_1'010 0x05 "hello" -> 0x0A 05 "h" "e" "l" "l" "o"
+            // name_mapping[0].value == Value.{15} -> LEN record containing VARINT =15
+            // VARINT: 15: with tag=4
+            // 010_0'000 0x0F -> 0x20 0F
+            //                .value: LEN of 2, tag=2 -> 0001_0'010 0x02 -> 0x12 0x02
+            // Wrapped up in a LEN for the message, field_number = 1;
+            //  LEN(wire:2) length 11 [] -> 000_1'010 0x0b, [] -> 0x0A 0x09
+            test_eq(as_bytes, u8.[0x0A, 0x0B, 0x0A, 0x05, "h", "e", "l", "l", "o", 0x12, 0x02, 0x20, 0x0F]);
+
+            decoded: Struct;
+            Deserialize(*decoded, as_bytes);
+            found, value := table_find(*decoded.fields, "hello");
+            test_eq(found, true);
+            test_eq(value.x, 15);
+            FreeContents(*decoded);
+        }
+    }
 }
 
 

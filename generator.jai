@@ -122,7 +122,9 @@ generate_jai :: (set: *ProtoFileSet, protobuf_import := "") -> jai: string, fail
         mangle(*node.merged_package);
         code := generate_jai(node.merged_package, protobuf_import=protobuf_import);
         append(sb, code);
-        for node.children generate_recursive(sb, it, protobuf_import);
+        // Loop backwards so the dependencies are a little more likely to come first...
+        // For when it is inserted at a non-top-level location
+        for< node.children generate_recursive(sb, it, protobuf_import);
     }
 
     generate_recursive(*code_builder, set.root, protobuf_import);
@@ -668,19 +670,26 @@ generate_jai_parse_field :: (sb: *String_Builder, definition: ProtoDefinition, f
                                     case .VARINT;
                                         print(sb, "ok=, varint := decode_VARINT(*submessage); ");
                                         fn := ifx should_zigzag(proto) "unzigzag(varint)" else "varint";
-                                        print(sb, "got_%1, %1 = ok, xx,no_check %2;", variable, fn);
+                                        print(sb, "%1 = xx,no_check %2;", variable, fn);
                                     case .I32;
                                         fn := ifx proto == .FLOAT "decode_I32_float" else "decode_I32";
-                                        print(sb, "got_%1, %1 = %(*submessage);", variable, fn);
+                                        print(sb, "ok, %1 = %(*submessage);", variable, fn);
                                     case .I64;
                                         fn := ifx proto == .DOUBLE "decode_I64_float" else "decode_I64";
-                                        print(sb, "got_%1, %1 = %(*submessage);", variable, fn);
+                                        print(sb, "ok, %1 = %(*submessage);", variable, fn);
                                     case .LEN;
-                                        print(sb, "got_%1=, ptr := decode_string(*submessage); %1 = copy_string(ptr);", variable);
+                                        if proto == .MESSAGE {
+                                            // Must be a message, because enum has wire type VARINT
+                                            // We've only decoded the tag so far, so decode the LEN value, then decode the message
+                                            print(sb, "ok=, used:, subsub := decode_LEN(*submessage); ok = Deserialize(*%1, subsub);", variable);
+                                        } else {
+                                            assert(proto == .STRING);
+                                            print(sb, "ok, ptr := decode_string(*submessage); %1 = copy_string(ptr);", variable);
+                                        }
                                 }
                             }
 
-                            print(sb, " key: %; value: %; got_key := false; got_value := false; ", jai_type(key_proto, ""), jai_type(value_proto, ""));
+                            print(sb, " key: %; value: %; ", jai_type(key_proto, field.map_key), jai_type(value_proto, field.map_value));
                             print(sb, "while submessage {\n");
                             print(sb, "%ok=, wire_type, field_number := decode_tag(*submessage); if !ok return false;\n", indent_str);
                             print(sb, "%if field_number == 1 && wire_type == .% { ", indent_str, key_wire);
