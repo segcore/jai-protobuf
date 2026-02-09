@@ -146,6 +146,7 @@ double up?
   * [x] Packed repeated fields - Decode
 * [x] Map types
 * [x] One-of types
+* [ ] Recursive types (e.g. google/protobuf/struct.proto)
 
 Not intended to be implemented:
 * Field presence information

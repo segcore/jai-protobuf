@@ -1,8 +1,12 @@
-#import,dir ".";
+#import,dir "..";
 #import "File";
 #import "Hash_Table";
 #import "Basic";
 #import "String";
+
+SEARCH_DIRS :: string.[
+    "/usr/include",
+];
 
 main :: () {
     context.print_style.default_format_int.base = 16;
@@ -296,14 +300,15 @@ test_parse :: () {
     p: ProtoFile;
     p = parse_proto_text(ProtoBasic1);
     test_eq(p.edition, "proto3");
-    test_eq(p.definitions.count, 1);
-    if p.definitions.count {
-        test_eq(p.definitions[0].kind, .MESSAGE);
-        test_eq(p.definitions[0].fields.count, 1);
-        test_eq(p.definitions[0].fields[0].type_name, "int32");
-        test_eq(p.definitions[0].fields[0].type, .INT32);
-        test_eq(p.definitions[0].fields[0].name, "a");
-        test_eq(p.definitions[0].fields[0].field_number, 1);
+    test_eq(p.definitions == null, false);
+    if p.definitions {
+        definition := p.definitions;
+        test_eq(definition.kind, .MESSAGE);
+        test_eq(definition.fields.count, 1);
+        test_eq(definition.fields[0].type_name, "int32");
+        test_eq(definition.fields[0].type, .INT32);
+        test_eq(definition.fields[0].name, "a");
+        test_eq(definition.fields[0].field_number, 1);
     }
 
     jai_code := generate_jai(p);
@@ -353,7 +358,7 @@ Point2D :: struct {
         */
         message Y { int32 y = 1; /* int32 z = 2; */ }
     END);
-    test_eq(p.definitions.count, 1);
+    test_eq(p.definitions == null, false);
     test_eq(p.definitions[0].name, "Y");
     test_eq(p.definitions[0].fields.count, 1);
     test_eq(p.definitions[0].fields[0].name, "y");
@@ -378,7 +383,7 @@ Point2D :: struct {
     test_eq(p.imports[0], "dir/other.proto");
     test_eq(p.imports[1], "dir/something.proto");
     test_eq(p.package, "testies.two");
-    test_eq(p.definitions.count, 1);
+    test_eq(p.definitions == null, false);
     test_eq(p.definitions[0].name, "Test");
     test_eq(p.definitions[0].fields.count, 2);
     test_eq(p.definitions[0].fields[0].name, "sicles");
@@ -400,18 +405,19 @@ Point2D :: struct {
             double time = 8;
         }
     END);
-    test_eq(p.definitions.count, 1);
-    test_eq(p.definitions[0].name, "Body");
-    test_eq(p.definitions[0].fields.count, 2);
-    test_eq(p.definitions[0].fields[0].name, "x");
-    test_eq(p.definitions[0].fields[1].name, "time");
-    test_eq(p.definitions[0].one_ofs.count, 1);
-    test_eq(p.definitions[0].one_ofs[0].name, "Appendage");
-    test_eq(p.definitions[0].one_ofs[0].fields.count, 3);
-    test_eq(p.definitions[0].one_ofs[0].fields[0].name, "arms");
-    test_eq(p.definitions[0].one_ofs[0].fields[1].name, "legs");
-    test_eq(p.definitions[0].one_ofs[0].fields[2].name, "body_girth");
-    test_eq(p.definitions[0].one_ofs[0].fields[2].type, .FLOAT);
+    test_eq(p.definitions == null, false);
+    test_eq(p.definitions.name, "Body");
+    test_eq(p.definitions.fields.count, 2);
+    test_eq(p.definitions.fields[0].name, "x");
+    test_eq(p.definitions.fields[1].name, "time");
+    one_of := p.definitions.*.first_child;
+    test_eq(one_of == null, false);
+    test_eq(one_of.name, "Appendage");
+    test_eq(one_of.fields.count, 3);
+    test_eq(one_of.fields[0].name, "arms");
+    test_eq(one_of.fields[1].name, "legs");
+    test_eq(one_of.fields[2].name, "body_girth");
+    test_eq(one_of.fields[2].type, .FLOAT);
 
     // Nested Enum parsing
     p = parse_proto_text(#string END
@@ -426,17 +432,15 @@ Point2D :: struct {
             E v = 2;
         }
     END);
-    test_eq(p.definitions.count, 1);
-    test_eq(p.definitions[0].name, "M");
-    test_eq(p.definitions[0].fields.count, 2);
-    test_eq(p.definitions[0].fields[0].name, "x");
-    test_eq(p.definitions[0].fields[1].name, "v");
-    test_eq(p.definitions[0].subtypes.count, 1);
-    test_eq(p.definitions[0].subtypes[0].name, "E");
-    test_eq(p.definitions[0].subtypes[0].kind, .ENUM);
-    test_eq(p.definitions[0].subtypes[0].fields.count, 2);
-    test_eq(p.definitions[0].subtypes[0].fields[0].name, "v0");
-    test_eq(p.definitions[0].subtypes[0].fields[1].name, "v1");
+    test_eq(p.definitions.name, "M");
+    test_eq(p.definitions.fields.count, 2);
+    test_eq(p.definitions.fields[0].name, "x");
+    test_eq(p.definitions.fields[1].name, "v");
+    test_eq(p.definitions.first_child.name, "E");
+    test_eq(p.definitions.first_child.kind, .ENUM);
+    test_eq(p.definitions.first_child.fields.count, 2);
+    test_eq(p.definitions.first_child.fields[0].name, "v0");
+    test_eq(p.definitions.first_child.fields[1].name, "v1");
 }
 
 
@@ -716,6 +720,52 @@ test_generate :: () {
     {
         jai_code :: #run generate_jai(parse_proto_text(#string END
             message M {
+                enum MyEnum1 {
+                    v0 = 0;
+                    v1 = 1;
+                }
+                message Sub1 {
+                    M.MyEnum1 evalue = 2;
+                }
+                message Sub2 {
+                    M.MyEnum2 evalue = 2;
+                }
+                message Sub3 {
+                    M.MyEnum3 evalue = 2;
+                }
+                message Sub4 {
+                    M.MyEnum1 evalue = 2;
+                }
+                enum MyEnum2 {
+                    v0 = 0;
+                    v1 = 1;
+                }
+                enum MyEnum3 {
+                    v0 = 0;
+                    v1 = 1;
+                }
+                message Sub5 {
+                    M.MyEnum1 evalue = 2;
+                }
+                Sub1 sub1 = 1;
+                Sub2 sub2 = 2;
+                Sub3 sub3 = 3;
+                Sub4 sub4 = 4;
+                Sub5 sub5 = 5;
+            }
+        END));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        else {
+            #insert jai_code;
+            message: M;
+            as_bytes := Serialize(message);
+            test_eq(as_bytes, u8.[]);
+        }
+    }
+
+    {
+        jai_code :: #run generate_jai(parse_proto_text(#string END
+            message M {
                 enum MyEnum {
                     v0 = 0;
                     v1 = 1;
@@ -914,9 +964,9 @@ test_generate :: () {
 
 
 test_generate_from_file :: () {
-    input_path :: "examples/protos/many_things.proto";
-    output_path :: "examples/generated/many_things.proto.jai";
-    make_directory_if_it_does_not_exist("examples/generated");
+    input_path :: "../examples/protos/many_things.proto";
+    output_path :: "../examples/generated/many_things.proto.jai";
+    make_directory_if_it_does_not_exist("../examples/generated");
 
     resulting_code := generate_jai(parse_proto_file(input_path));
     ok := write_entire_file(output_path, resulting_code);

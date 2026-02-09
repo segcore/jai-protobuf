@@ -1,5 +1,6 @@
 .build/
-test
+tests/test
+tests/well-known
 
 examples/*
 !examples/*.jai

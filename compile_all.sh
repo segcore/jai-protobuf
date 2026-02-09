@@ -1,7 +1,12 @@
 set -xe
 
-jai -x64 test.jai -quiet
-./test
+(
+    cd tests
+    jai -x64 test.jai -quiet
+    ./test
+    jai -x64 well-known.jai -quiet
+    ./well-known
+)
 (
     cd examples
     jai -x64 01-compiletime.jai -quiet
