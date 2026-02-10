@@ -531,10 +531,11 @@ generate_jai_field :: (sb: *String_Builder, field: ProtoField, indent_level: int
     } else {
         print(sb, "%0%: %", indent, field.name, jai_type(field.type, field.type_name));
     }
-    if field.default print(sb, " = %", field.default);
+    // Enums are marked as message types, and need the . prefix to be automatically inferred as an enum constant
+    if field.default print(sb, " = %2%1", field.default, ifx field.type == .MESSAGE ".");
     print(sb, ";");
     if field.deprecated print(sb, " @deprecated");
-    if field.optional print(sb, " @optional");
+    // if field.optional print(sb, " @optional"); // This is really noisy for files which mark everything optional
     if field.required print(sb, " @required");
     print(sb, "\n");
 }

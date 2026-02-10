@@ -3,7 +3,7 @@
 compile_files :: string.[
     "google/protobuf/any.proto",
     "google/protobuf/api.proto",
-    // "google/protobuf/descriptor.proto", // no default value on enums
+    "google/protobuf/descriptor.proto",
     "google/protobuf/duration.proto",
     "google/protobuf/empty.proto",
     "google/protobuf/field_mask.proto",
