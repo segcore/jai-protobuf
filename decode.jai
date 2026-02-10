@@ -66,6 +66,11 @@ decode_string :: (buf: *[]u8) -> ok: bool, str: string {
     return ok, str;
 }
 
+decode_bytes :: (buf: *[]u8) -> ok: bool, bytes: []u8 {
+    ok, _, bytes := decode_LEN(buf);
+    return ok, bytes;
+}
+
 decode_I64 :: (buf: *[]u8) -> ok: bool, value: s64 {
     size := 8;
     if buf.count >= size then {

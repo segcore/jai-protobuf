@@ -334,6 +334,18 @@ mangle :: (name: string) -> string {
     mangled_name := name;
     reserved :: string.[
         "Any",
+        "int",
+        "struct",
+        "enum",
+        "union",
+        "interface",
+        "if",
+        "else",
+        "for",
+        "while",
+        "break",
+        "continue",
+        "inline",
     ];
 
     // Try to avoid allocations
@@ -371,6 +383,8 @@ mangle :: (proto_file: *ProtoFile) {
         definition.name = mangle(definition.name);
         for* field : definition.fields {
             field.name = mangle(field.name);
+            field.map_key = mangle(field.map_key);
+            field.map_value = mangle(field.map_value);
             field.type_name = mangle(field.type_name);
         }
     }
@@ -574,7 +588,7 @@ generate_jai_free_function :: (sb: *String_Builder, definition: ProtoDefinition,
             if free_key || free_value {
                 print(*sb2, "    for* v, k : message.% {", field.name);
                 if free_key   print(*sb2, " %(k);", free_function_name(proto_type(field.map_key)));
-                if free_value print(*sb2, " %(v);", free_function_name(proto_type(field.map_key)));
+                if free_value print(*sb2, " %(v);", free_function_name(proto_type(field.map_value)));
                 print(*sb2, " }\n", field.name);
             }
             print(*sb2, "    deinit(*message.%1); message.%1 = .{};\n", field.name);
@@ -761,9 +775,12 @@ generate_jai_parse_field :: (sb: *String_Builder, proto_file: ProtoFile, definit
                                             // Must be a message, because enum has wire type VARINT
                                             // We've only decoded the tag so far, so decode the LEN value, then decode the message
                                             print(sb, "ok=, used:, subsub := decode_LEN(*submessage); ok = Deserialize(*%1, subsub);", variable);
-                                        } else {
-                                            assert(proto == .STRING);
+                                        } else if proto == .STRING {
                                             print(sb, "ok, ptr := decode_string(*submessage); %1 = copy_string(ptr);", variable);
+                                        } else if proto == .BYTES {
+                                            print(sb, "ok, ptr := decode_bytes(*submessage); %1 = array_copy(ptr);", variable);
+                                        } else {
+                                            assert(false, "Unknown type %. Wire type %, variable %", proto, wire, variable);
                                         }
                                 }
                             }
