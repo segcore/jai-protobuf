@@ -560,9 +560,10 @@ generate_jai_free_function :: (sb: *String_Builder, definition: ProtoDefinition,
 
     should_free :: (type: ProtoType) -> bool {
         if type == {
-            case .STRING; #through;
-            case .BYTES; #through;
             case .MESSAGE; return true;
+            // Fields are no longer allocated. But this may be required later if we add a DeepCopy
+            case .STRING; #through;
+            case .BYTES; return false;
             case; return false;
         }
     }
@@ -598,13 +599,11 @@ generate_jai_free_function :: (sb: *String_Builder, definition: ProtoDefinition,
             }
             print(*sb2, "    array_reset(*message.%);\n", field.name);
         } else {
-            newline := false;
             if should_free(field.type) {
                 print(*sb2, "    %(%message.%);", free_function_name(field.type), pointer(field.type), field.name);
-                newline = true;
+                if field.type == .STRING  print(*sb2, " message.% = \"\";", field.name);
+                print(*sb2, "\n");
             }
-            if field.type == .STRING  print(*sb2, " message.% = \"\";", field.name);
-            if newline print(*sb2, "\n");
         }
     }
     if builder_string_length(*sb2) == 0 {
@@ -741,11 +740,11 @@ generate_jai_parse_field :: (sb: *String_Builder, proto_file: ProtoFile, definit
                 print(sb, "            case %; ", formatInt(field.field_number));
                 if field.type == {
                     case .STRING;
-                        if repeated  print(sb, "array_add(*message.%, copy_string(submessage.(string)));", field.name);
-                        else         print(sb, "message.% = copy_string(submessage.(string));", field.name);
+                        if repeated  print(sb, "array_add(*message.%, submessage.(string));", field.name);
+                        else         print(sb, "message.% = submessage.(string);", field.name);
                     case .BYTES;
-                        if repeated  print(sb, "array_add(*message.%, array_copy(submessage));", field.name);
-                        else         print(sb, "message.% = array_copy(submessage);", field.name);
+                        if repeated  print(sb, "array_add(*message.%, submessage);", field.name);
+                        else         print(sb, "message.% = submessage;", field.name);
                     case .MESSAGE;
                         // Could be a repeated enum, or a Message
                         // Messages consume all of the bytes, and repeated enums may not
@@ -776,9 +775,9 @@ generate_jai_parse_field :: (sb: *String_Builder, proto_file: ProtoFile, definit
                                             // We've only decoded the tag so far, so decode the LEN value, then decode the message
                                             print(sb, "ok=, used:, subsub := decode_LEN(*submessage); ok = Deserialize(*%1, subsub);", variable);
                                         } else if proto == .STRING {
-                                            print(sb, "ok, ptr := decode_string(*submessage); %1 = copy_string(ptr);", variable);
+                                            print(sb, "ok, %1 = decode_string(*submessage);", variable);
                                         } else if proto == .BYTES {
-                                            print(sb, "ok, ptr := decode_bytes(*submessage); %1 = array_copy(ptr);", variable);
+                                            print(sb, "ok, %1 = decode_bytes(*submessage);", variable);
                                         } else {
                                             assert(false, "Unknown type %. Wire type %, variable %", proto, wire, variable);
                                         }

@@ -145,10 +145,10 @@ Deserialize :: (message: *ManyThings, bytes: []u8) -> ok: bool, used: s64 = 0 {
             if field_number == {
             case 2; while submessage {ok=, decoded_value := decode_I32_float(*submessage); if !ok return false; array_add(*message.values, decoded_value); }
             case 4; if !Deserialize(*message.submessage, submessage)  return false;
-            case 5; message.something = copy_string(submessage.(string));
+            case 5; message.something = submessage.(string);
             case 7;  key: string; value: s32; while submessage {
                 ok=, wire_type, field_number := decode_tag(*submessage); if !ok return false;
-                if field_number == 1 && wire_type == .LEN { ok, ptr := decode_string(*submessage); key = copy_string(ptr); }
+                if field_number == 1 && wire_type == .LEN { ok, key = decode_string(*submessage); }
                 else if field_number == 2 && wire_type == .VARINT { ok=, varint := decode_VARINT(*submessage); value = xx,no_check varint; }
                 else { ok = decode_skip(*submessage, wire_type); }
                 if !ok return false; }
@@ -162,8 +162,6 @@ FreeContents :: (message: *ManyThings) {
     FreeContents(*message.my_enum);
     array_reset(*message.values);
     FreeContents(*message.submessage);
-    free(message.something); message.something = "";
     FreeContents(*message.subtype_value);
-    for* v, k : message.name_mapping { free(k); }
     deinit(*message.name_mapping); message.name_mapping = .{};
 }
