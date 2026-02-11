@@ -960,6 +960,28 @@ test_generate :: () {
             FreeContents(*decoded);
         }
     }
+
+    #if 0 // Recursive data structures are not supported
+    {
+        jai_code :: #run generate_jai(parse_proto_text(#string END
+            message TestRecursive {
+                int32 value = 1;
+                TestRecursive nested = 2;
+            }
+        END));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        else {
+            #insert jai_code;
+
+            message: TestRecursive;
+            as_bytes := Serialize(message);
+            test_eq(as_bytes, u8.[]);
+
+            decoded: TestRecursive;
+            Deserialize(*decoded, as_bytes);
+            FreeContents(*decoded);
+        }
+    }
 }
 
 
