@@ -14,4 +14,5 @@ set -xe
     ./02a-pregenerate
     jai -x64 02b-use_generated.jai -quiet
     jai -x64 03-imports.jai -quiet
+    jai -x64 proto-to-jai.jai -quiet
 )
