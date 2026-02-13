@@ -867,7 +867,7 @@ test_generate :: () {
         }
     }
 
-    {
+    { // Map to primitive
         jai_code :: #run generate_jai(parse_proto_text(#string END
             message M {
                 map<string, int32> name_mapping = 1;
@@ -923,7 +923,7 @@ test_generate :: () {
         }
     }
 
-    {
+    { // Map to struct
         jai_code :: #run generate_jai(parse_proto_text(#string END
             message Struct {
                 map<string, Value> fields = 1;
@@ -958,6 +958,85 @@ test_generate :: () {
             test_eq(found, true);
             test_eq(value.x, 15);
             FreeContents(*decoded);
+        }
+    }
+
+    {
+        // Ensure required values are always encoded
+        jai_code :: #run generate_jai(parse_proto_text(#string END
+            message M {
+                required int32 i1 = 1;
+            }
+        END));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        else {
+            #insert jai_code;
+
+            message: M;
+            test_eq(message.i1, 0);
+            as_bytes := Serialize(message);
+            test_eq(as_bytes, u8.[0x08, 0x00]);
+        }
+    }
+
+    { // Test default values work as intended
+        jai_code :: #run generate_jai(parse_proto_text(#string END
+            message M {
+                int32 i1 = 1 [default = 5];
+                int32 i2 = 2 [default = 0x08];
+                int32 i3 = 3 [default = 0xabcd8000];
+                float f1 = 4 [default = 1.23];
+                float f2 = 5 [default = -5.4e3];
+                string s = 6 [default = "Cake!"];
+            };;;
+        END));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        else {
+            #insert jai_code;
+
+            message: M;
+            test_eq(message.i1, 5);
+            test_eq(message.i2, 0x08);
+            test_eq(message.i3, 0xabcd8000);
+            test_eq(message.f1, 1.23);
+            test_eq(message.f2, -5.4e3);
+            test_eq(message.s, "Cake!");
+            as_bytes := Serialize(message);
+            test_eq(as_bytes, u8.[]);
+
+        }
+    }
+
+    { // ignore service {} and extend {}
+        jai_code :: #run generate_jai(parse_proto_text(#string END
+            service SearchService {
+                rpc Search (SearchRequest) returns (SearchResponse);
+            }
+            extend google.protobuf.EnumValueOptions {
+                optional string string_name = 123456789;
+            }
+            message Abc {
+            }
+        END));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        else {
+            test_eq(jai_code == "", false);
+        }
+    }
+
+    { // Weird extension attribute naming
+        jai_code :: #run generate_jai(parse_proto_text(#string END
+            enum Data {
+                DATA_ASDF = 1;
+                DATA_DISPLAY = 2 [(string_name) = "display_value"];
+                DATA_WHATEVER = 3 [(thing.foo).bar = "display_value"];
+                DATA_QWERTY = 4 [(thing.foo).bar = { opt1: 123 opt2: "baz" }];
+            }
+        END));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        else {
+            #insert jai_code;
+            x := Data.DATA_DISPLAY;
         }
     }
 

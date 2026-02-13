@@ -231,6 +231,10 @@ parse_proto_files_set :: (set: *ProtoFileSet, input_protos: []string, search_dir
     found_something := false;
 
     for input_path : input_protos {
+        // If the lookup has already failed, just skip it
+        if array_find(set.failed_imports, input_path) {
+            continue input_path;
+        }
         for search_dir : search_dirs {
             full_import_path: string;
             if search_dir {
@@ -238,12 +242,13 @@ parse_proto_files_set :: (set: *ProtoFileSet, input_protos: []string, search_dir
             } else {
                 full_import_path = input_path;
             }
-            log("Search for % at %\n", input_path, full_import_path, flags = .VERBOSE_ONLY);
 
             // Don't reimport the same files over and over
             if array_find(set.imported_protos, full_import_path) {
                 continue input_path;
             }
+
+            log("Search for % at %\n", input_path, full_import_path, flags = .VERBOSE_ONLY);
 
             // Accept the import if the file exists, even if the file is empty
             no_logger :: (message: string, data: *void, info: Log_Info) {}
@@ -948,11 +953,22 @@ indent_str :: (indent_level: int) -> string {
 #scope_file
 
 parse_primary :: (p: *Parser, out: *ProtoFile) -> keep_going: bool {
-    ok, id := parse(p, TokenKind.ID);
-    if !ok {
-        t := next(p);
-        return t.kind != .EOF;
+    t := peek(p);
+    id: string;
+    ok := true;
+    while t.kind != .ID {
+        if t.kind == {
+            case .EOF; return false;
+            case .SEMICOLON; // allow trailing ; without complaining
+                t = next(p);
+            case;
+                // print the warning
+                parse(p, .ID);
+                t = next(p);
+        }
     }
+    id = t.text;
+    next(p);
 
     if id == {
         case "syntax"; #through;
@@ -978,11 +994,43 @@ parse_primary :: (p: *Parser, out: *ProtoFile) -> keep_going: bool {
         case "enum";
             append_sibling(*out.definitions, parse_enum(p, null));
             return true;
+        case "service";
+            skip_service(p);
+        case "extend";
+            skip_extend(p);
         case;
             log("Unknown ID %", id);
     }
 
     return true;
+}
+
+skip_service :: (p: *Parser) {
+    ok := parse(p, .ID);
+
+    ok = parse(p, .OCURLY);
+    t := peek(p);
+    while true {
+        if t.kind == {
+            case .EOF; return;
+            case .CCURLY; break;
+            case; t = next(p);
+        }
+    }
+}
+
+skip_extend :: (p: *Parser) {
+    ok := parse(p, .ID);
+
+    ok = parse(p, .OCURLY);
+    t := peek(p);
+    while true {
+        if t.kind == {
+            case .EOF; return;
+            case .CCURLY; break;
+            case; t = next(p);
+        }
+    }
 }
 
 append_sibling :: (first_child: **ProtoDefinition, new_child: *ProtoDefinition) {
@@ -1026,6 +1074,26 @@ parse_field_option :: (p: *Parser) -> ok:bool, option: ProtoOption {
     option: ProtoOption;
 
     t = peek(p);
+
+    // Extension attributes of the form (abc.def).foo = "value"
+    // We don't support extensions, so they're ignored and skipped over
+    if t.kind == .OPAREN {
+        while t.kind != .CPAREN {
+            t = next(p);
+            if t.kind == .EOF return false, option;
+        }
+        // Optional ID
+        t = next(p);
+        if t.kind == .ID t = next(p);
+        if t.kind == .EQ t = next(p);
+        else {
+            skip_to(p, .CSQUARE);
+            return false, option;
+        }
+        skip_to(p, .CSQUARE);
+        return false, option;
+    }
+
     if t.kind != .ID return false, option;
     option.name = t.text;
     next(p);
@@ -1047,7 +1115,7 @@ parse_import :: (p: *Parser) -> ok: bool, path: string {
     t: Token;
     t = next(p);
     if t.kind == .ID {
-        if t.text == "public" {
+        if t.text == "public" || t.text == "weak" {
             t = next(p);
         }
         else return false, "";
@@ -1275,6 +1343,14 @@ parse_field :: (p: *Parser, definition: *ProtoDefinition) -> ok: bool {
     return true;
 }
 
+skip_to :: (p: *Parser, kinds: ..TokenKind) -> ok: bool {
+    while true {
+        t := next(p);
+        if array_find(kinds, t.kind) return true;
+        if t.kind == .EOF break;
+    }
+    return false;
+}
 
 parse :: (p: *Parser, kind: TokenKind) -> ok: bool, text: string {
     t := peek(p);
@@ -1321,7 +1397,7 @@ peek :: (p: *Parser) -> Token {
     t: Token;
     i := 0;
 
-    if is_any(str[i], ",;{}[]<>=") {
+    if is_any(str[i], ",;(){}[]<>=") {
         t.text = slice(str, 0, 1);
         if str[i] == {
             case ",";
@@ -1329,6 +1405,12 @@ peek :: (p: *Parser) -> Token {
                 return t;
             case ";";
                 t.kind = .SEMICOLON;
+                return t;
+            case "(";
+                t.kind = .OPAREN;
+                return t;
+            case ")";
+                t.kind = .CPAREN;
                 return t;
             case "{";
                 t.kind = .OCURLY;
@@ -1356,9 +1438,10 @@ peek :: (p: *Parser) -> Token {
         }
     }
 
-    if str[i] == "-" || (str[i] >= "0" && str[i] <= "9") {
+    if str[i] == "-" || str[i] == "+" || is_digit(str[i]) {
         i += 1;
-        while str[i] >= "0" && str[i] <= "9" {
+        // while str[i] >= "0" && str[i] <= "9" {
+        while is_digit(str[i]) || is_alpha(str[i]) || str[i] == "." || str[i] == "-" || str[i] == "+" {
             i += 1;
         }
         return Token.{kind = .NUMBER, text = slice(str, 0, i)};
@@ -1406,6 +1489,8 @@ TokenKind :: enum {
     EOF; // end-of-file (end of string)
 
     SEMICOLON;
+    OPAREN;
+    CPAREN;
     OCURLY;
     CCURLY;
     OSQUARE;
