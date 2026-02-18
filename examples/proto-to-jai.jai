@@ -88,10 +88,10 @@ main :: () {
             }
         }
         add_proto_tree_file(*set, stdin_proto_file);
-        parse_proto_files_set(*set, stdin_proto_file.imports, search);
+        parse_proto_files_set(*set, ..stdin_proto_file.imports, search_dirs=search);
     }
 
-    parse_proto_files_set(*set, files, search);
+    parse_proto_files_set(*set, ..files, search_dirs=search);
 
     jai, failed_imports := generate_jai(*set);
 

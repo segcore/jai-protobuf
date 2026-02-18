@@ -20,7 +20,7 @@ main :: () {
     outpath :: "generated/protobuf_definitions.jai";
     make_directory_if_it_does_not_exist("generated");
 
-    jai, failed_imports := generate_jai(protos);
+    jai, failed_imports := generate_jai(..protos);
     ok := write_entire_file(outpath, jai);
 
     if ok print("Generated '%'\n", outpath);

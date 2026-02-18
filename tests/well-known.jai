@@ -15,7 +15,7 @@ compile_files :: string.[
 ];
 search_dirs :: string.["", "/usr/include"];
 
-#insert #run generate_jai(compile_files, search_dirs);
+#insert #run generate_jai(..compile_files, search_dirs);
 
 main :: () {
 }

@@ -15,7 +15,7 @@
 
 // Insert the generated code.
 // See .build/.added_strings_w2.jai
-#insert #run generate_jai(.["protos/some_things.proto"]);
+#insert #run generate_jai("protos/some_things.proto");
 
 main :: () {
     group: Group;

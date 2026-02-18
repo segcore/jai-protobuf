@@ -26,6 +26,7 @@ ProtoFileTree :: struct {
     children: [..]ProtoFileTree;
 }
 
+// Has a for_expansion to loop over siblings
 ProtoDefinition :: struct {
     kind : ProtoDefinitionKind;
     name: string;
@@ -76,54 +77,6 @@ ProtoOption :: struct {
     value: string;
 }
 
-// For expansion, loops all siblings of this element
-for_expansion :: (first_sibling: *ProtoDefinition, body: Code, flags: For_Flags) #expand {
-    if first_sibling == null return;
-
-    child_index := 0;
-    #if (flags & .REVERSE) {
-        first := first_sibling.prev_sibling;
-    } else {
-        first := first_sibling;
-    }
-    iterator := first;
-    while true {
-        #if flags & .POINTER {
-            `it := iterator;
-        } else {
-            `it := iterator.*;
-        }
-        `it_index := child_index;
-
-        defer {
-            child_index += 1;
-            #if (flags & .REVERSE) {
-                iterator = iterator.prev_sibling;
-            } else {
-                iterator = iterator.next_sibling;
-            }
-
-            if iterator == first {
-                break;
-            }
-        }
-
-        #insert (remove=#assert(false)) body;
-    }
-}
-
-// for :one_ofs expansion
-one_ofs :: (first_sibling: *ProtoDefinition, body: Code, flags: For_Flags) #expand {
-    for *=cast(bool, flags & .POINTER), <=cast(bool, flags & .REVERSE)  raw_it, raw_index : first_sibling {
-        if raw_it.kind != .ONE_OF then continue;
-
-        `it := raw_it;
-        `it_index := raw_index;
-
-        #insert body;
-    }
-}
-
 INDENT :: 4;
 
 parse_proto_text :: (data: string, source_path: string = "") -> ProtoFile, ok: bool {
@@ -154,15 +107,15 @@ parse_proto_file :: (source_path: string) -> ProtoFile, ok: bool {
     return proto_file, ok;
 }
 
-parse_proto_files :: (input_protos: []string, search_dirs: []string = .[""]) -> ProtoFileSet, ok: bool {
+parse_proto_files :: (input_protos: ..string, search_dirs: []string = .[""]) -> ProtoFileSet, ok: bool {
     set: ProtoFileSet;
-    ok := parse_proto_files_set(*set, input_protos, search_dirs);
+    ok := parse_proto_files_set(*set, ..input_protos, search_dirs);
     return set, ok;
 }
 
 // Generate Jai code for all files given, searching in given import directories.
-generate_jai :: (input_protos: []string, search_dirs: []string = .[""], protobuf_import := "") -> jai: string, failed_imports: []string {
-    jai, failed_imports := generate_jai(*parse_proto_files(input_protos, search_dirs), protobuf_import=protobuf_import);
+generate_jai :: (input_protos: ..string, search_dirs: []string = .[""], protobuf_import := "") -> jai: string, failed_imports: []string {
+    jai, failed_imports := generate_jai(*parse_proto_files(..input_protos, search_dirs), protobuf_import=protobuf_import);
     return jai, failed_imports;
 }
 
@@ -227,7 +180,7 @@ reset :: (set: *ProtoFileSet) {
     array_reset(*set.failed_imports);
 }
 
-parse_proto_files_set :: (set: *ProtoFileSet, input_protos: []string, search_dirs: []string = string.[""]) -> ok: bool {
+parse_proto_files_set :: (set: *ProtoFileSet, input_protos: ..string, search_dirs: []string = string.[""]) -> ok: bool {
     found_something := false;
 
     for input_path : input_protos {
@@ -261,7 +214,7 @@ parse_proto_files_set :: (set: *ProtoFileSet, input_protos: []string, search_dir
                 found_something = true;
 
                 add_proto_tree_file(set, proto_file);
-                parse_proto_files_set(set, proto_file.imports, search_dirs);
+                parse_proto_files_set(set, ..proto_file.imports, search_dirs);
                 continue input_path;
             }
         }
@@ -948,6 +901,54 @@ indent_str :: (indent_level: int) -> string {
     SPACES :: "                                        ";
     length := indent_level * INDENT;
     return slice(SPACES, 0, length);
+}
+
+// For expansion, loops all siblings of this element
+for_expansion :: (first_sibling: *ProtoDefinition, body: Code, flags: For_Flags) #expand {
+    if first_sibling == null return;
+
+    child_index := 0;
+    #if (flags & .REVERSE) {
+        first := first_sibling.prev_sibling;
+    } else {
+        first := first_sibling;
+    }
+    iterator := first;
+    while true {
+        #if flags & .POINTER {
+            `it := iterator;
+        } else {
+            `it := iterator.*;
+        }
+        `it_index := child_index;
+
+        defer {
+            child_index += 1;
+            #if (flags & .REVERSE) {
+                iterator = iterator.prev_sibling;
+            } else {
+                iterator = iterator.next_sibling;
+            }
+
+            if iterator == first {
+                break;
+            }
+        }
+
+        #insert (remove=#assert(false)) body;
+    }
+}
+
+// For expansion picking only one_ofs. Usage: "for :one_ofs xxx"
+one_ofs :: (first_sibling: *ProtoDefinition, body: Code, flags: For_Flags) #expand {
+    for *=cast(bool, flags & .POINTER), <=cast(bool, flags & .REVERSE)  raw_it, raw_index : first_sibling {
+        if raw_it.kind != .ONE_OF then continue;
+
+        `it := raw_it;
+        `it_index := raw_index;
+
+        #insert body;
+    }
 }
 
 #scope_file
