@@ -100,7 +100,7 @@ decodes any protobuf at runtime, for example.
 
 Structures, enumerations, and serialization-related functions are generated
 according to protobuf text descriptions.
-See the complete example's [protobuf description](./examples/many_things.proto)
+See the complete example's [protobuf description](./examples/protos/many_things.proto)
 and its [generated code](./examples/generated/many_things.proto.jai).
 The generated code is very simple -- normal structures with (public) fields
 just as you would write them normally. No added indirection. Repeated fields
