@@ -503,7 +503,7 @@ generate_jai_for_definitions :: (sb: *String_Builder, set: *ProtoDefinition, pro
                 continue;
         }
 
-        generate_jai_free_function(sb, definition, dotted_name);
+        generate_jai_free_function(sb, definition, dotted_name, proto_file);
     }
 }
 
@@ -526,12 +526,14 @@ generate_jai_field :: (sb: *String_Builder, field: ProtoField, indent_level: int
 }
 
 
-generate_jai_free_function :: (sb: *String_Builder, definition: ProtoDefinition, dotted_name: string) {
+generate_jai_free_function :: (sb: *String_Builder, definition: ProtoDefinition, dotted_name: string, proto_file: ProtoFile) {
     sb2: String_Builder;
 
-    should_free :: (type: ProtoType) -> bool {
+    should_free :: (proto_file: ProtoFile, location: ProtoDefinition, type: ProtoType, type_name: string) -> bool {
         if type == {
-            case .MESSAGE; return true;
+            case .MESSAGE;
+                resolved := resolve_definition(proto_file, location, type_name);
+                return !resolved || resolved.kind == .MESSAGE;
             // Fields are no longer allocated. But this may be required later if we add a DeepCopy
             case .STRING; #through;
             case .BYTES; return false;
@@ -555,8 +557,8 @@ generate_jai_free_function :: (sb: *String_Builder, definition: ProtoDefinition,
 
     for field : definition.fields {
         if field.map {
-            free_key := should_free(proto_type(field.map_key));
-            free_value := should_free(proto_type(field.map_value));
+            free_key := should_free(proto_file, definition, proto_type(field.map_key), field.map_key);
+            free_value := should_free(proto_file, definition, proto_type(field.map_value), field.map_value);
             if free_key || free_value {
                 print(*sb2, "    for* v, k : message.% {", field.name);
                 if free_key   print(*sb2, " %(k);", free_function_name(proto_type(field.map_key)));
@@ -565,12 +567,12 @@ generate_jai_free_function :: (sb: *String_Builder, definition: ProtoDefinition,
             }
             print(*sb2, "    deinit(*message.%1); message.%1 = .{};\n", field.name);
         } else if field.repeated {
-            if should_free(field.type) {
+            if should_free(proto_file, definition, field.type, field.type_name) {
                 print(*sb2, "    for%  message.%  %(it);\n", pointer(field.type), field.name, free_function_name(field.type));
             }
             print(*sb2, "    array_reset(*message.%);\n", field.name);
         } else {
-            if should_free(field.type) {
+            if should_free(proto_file, definition, field.type, field.type_name) {
                 print(*sb2, "    %(%message.%);", free_function_name(field.type), pointer(field.type), field.name);
                 if field.type == .STRING  print(*sb2, " message.% = \"\";", field.name);
                 print(*sb2, "\n");
