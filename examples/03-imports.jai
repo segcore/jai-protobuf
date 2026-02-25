@@ -20,7 +20,9 @@ main :: () {
     thing.timestamp.seconds = 42;
     thing.timestamp.nanos = 1234;
 
-    print("Bytes: %\n", Serialize(thing));
+    bytes := Serialize(thing,, temp);
+    print("Bytes: %\n", bytes);
+    write_entire_file("generated/times.pbin", bytes.(string));
 }
 
 #import "Basic";

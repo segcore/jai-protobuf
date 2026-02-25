@@ -31,6 +31,38 @@ ProtoType :: enum {
     FIXED32; SFIXED32; FLOAT;
 }
 
+// Holds a single decoded (tag, value) item from a Protobuf serialization
+ProtobufAtom :: struct {
+    // Buffer views of various parts of the message
+    atom_view:  []u8; // The byte range which this atom succesfully consumed in total
+    tag_view:   []u8; // Byte range of the tag (field_number + wire_type)
+    value_view: []u8; // Byte range of the value part
+
+    // tag information
+    tag_ok: bool;
+    wire_type: WireType;
+    field_number: int;
+
+    // Value parts of the message
+    value_ok: bool;
+
+    length: s64;        // of LEN messages
+    varint: u64;        // of VARINT (treated as u64)
+    varint_zigzag: s64; // of VARINT (treated as a zigzagged signed encoding)
+    I64_int: s64;       // of I64 (treated as an int)
+    I64_float: float64; // of I64 (treated as a float)
+    I32_int: s32;       // of I32 (treated as an int)
+    I32_float: float32; // of I32 (treated as a float)
+
+    // LEN payload
+    submessage: []u8;
+
+    // Failed to parse (may be present even when tag_ok=true, indicating that the tag succeeded but the value failed)
+    // This will contain the remaining bytes of the buffer
+    failed_view: []u8;
+};
+
+
 wire_type_for :: (proto_type: ProtoType) -> WireType {
     if #complete proto_type == {
         case .INT32; #through;

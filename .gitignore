@@ -6,3 +6,8 @@ examples/*
 !examples/*.jai
 !examples/*/**
 examples/generated/*
+
+tools/*
+!tools/*.jai
+!tools/*.proto
+!tools/resources

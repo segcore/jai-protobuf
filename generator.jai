@@ -1440,15 +1440,13 @@ peek :: (p: *Parser) -> Token {
     }
 
     if str[i] == "-" || str[i] == "+" || is_digit(str[i]) {
-        i += 1;
-        // while str[i] >= "0" && str[i] <= "9" {
-        while is_digit(str[i]) || is_alpha(str[i]) || str[i] == "." || str[i] == "-" || str[i] == "+" {
+        while i < str.count && (is_digit(str[i]) || is_alpha(str[i]) || str[i] == "." || str[i] == "-" || str[i] == "+") {
             i += 1;
         }
         return Token.{kind = .NUMBER, text = slice(str, 0, i)};
     }
 
-    while is_alnum(str[i]) || str[i] == "." {
+    while i < str.count && (is_alnum(str[i]) || str[i] == ".") {
         i += 1;
     }
     if i return Token.{kind = .ID, text = slice(str, 0, i)};

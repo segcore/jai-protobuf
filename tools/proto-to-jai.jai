@@ -1,3 +1,7 @@
+/**
+ * A command line utility to converts protobuf message descriptions to Jai source code.
+ */
+
 default_search_dirs :: string.["", "/usr/include"];
 program_name: string;
 

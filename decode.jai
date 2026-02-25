@@ -1,5 +1,18 @@
 /*
-    Protobuf message decoding primitives
+    Protobuf Decoding.
+
+    All values are encoded in forwards-order directly into the buffer.
+
+    Most of these are primitive functions, but see also decode_atom() and protobuf_atoms().
+
+    Example:
+        buffer: []u8 = .[0x08, 0x96, 0x01];
+        for :protobuf_atoms atom : buffer {
+            if atom.tag_ok {
+                print("Decoded wire_type=%, field_number=%, using a total of % bytes\n",
+                    atom.wire_type, atom.field_number, atom.atom_view.count);
+            }
+        }
  */
 
 decode_tag :: (buf: *[]u8) -> ok: bool, wire_type: WireType, field_number: int {
@@ -104,6 +117,87 @@ decode_I32 :: (buf: *[]u8) -> ok: bool, value: s32 {
 decode_I32_float :: (buf: *[]u8) -> ok: bool, value: float32 {
     ok, value := decode_I32(buf);
     return ok, (*value).(*float32).*;
+}
+
+// Extract the next atom (tag and value) from a Protobuf serialization
+decode_atom :: (buf: *[]u8) -> ProtobufAtom {
+    atom: ProtobufAtom;
+    atom.atom_view = buf.*;
+
+    atom.tag_view = buf.*;
+    atom.tag_ok, atom.wire_type, atom.field_number = decode_tag(buf);
+    atom.tag_view.count -= buf.count;
+
+    if atom.tag_ok {
+        atom.value_view = buf.*;
+        if #complete atom.wire_type == {
+            case .LEN;
+                value_ok, length, submessage := decode_LEN(buf);
+                atom.value_ok = value_ok;
+                atom.value_view.count -= (buf.count + submessage.count);
+                atom.length = length;
+                atom.submessage = submessage;
+            case .VARINT;
+                value_ok, value := decode_VARINT(buf);
+                atom.value_ok = value_ok;
+                atom.value_view.count -= buf.count;
+                atom.varint = value;
+                atom.varint_zigzag = unzigzag(value);
+            case .I64;
+                value_ok, value := decode_I64(buf);
+                atom.value_ok = value_ok;
+                atom.value_view.count -= buf.count;
+                converted := (*value).(*float64).*;
+                atom.I64_int = value;
+                atom.I64_float = converted;
+            case .I32;
+                value_ok, value := decode_I32(buf);
+                atom.value_ok = value_ok;
+                atom.value_view.count -= buf.count;
+                converted := (*value).(*float32).*;
+                atom.I32_int = value;
+                atom.I32_float = converted;
+            case .SGROUP; #through;
+            case .EGROUP;
+                atom.value_ok = true; // OK; no value
+                atom.value_view.count = 0;
+            case; // Invalid wire type decoded
+                atom.value_ok = false;
+                atom.value_view.count = 0;
+        }
+    }
+
+    atom.atom_view.count -= buf.count;
+
+    // We need to return the failed view in the same atom because when iteratively
+    // calling this we would start decoding the next byte as if it were a tag
+    // instead of just a failed part of the value
+    ok := atom.tag_ok && atom.value_ok;
+    if !ok {
+        atom.failed_view = buf.*;
+        buf.count = 0;
+    }
+
+    return atom;
+}
+
+// `for_expansion` which returns successive protobuf atoms until the buffer is exhausted
+protobuf_atoms :: (bytes: *[]u8, body: Code, flags: For_Flags) #expand {
+    #assert (flags & .POINTER) == 0;
+    #assert (flags & .REVERSE) == 0;
+
+    buf := bytes.*;
+    atom_count := 0;
+
+    while buf.count > 0 {
+        atom := decode_atom(*buf);
+
+        `it := atom;
+        `it_index := atom_count;
+        atom_count += 1;
+
+        #insert body;
+    }
 }
 
 unzigzag :: (value: u64) -> s64 {

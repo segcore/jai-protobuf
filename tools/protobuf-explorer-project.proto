@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+message Project {
+    int32 theme = 1;
+    repeated string file_bytes = 2;
+    repeated string file_protos = 3;
+    repeated string search_directories = 4;
+    int32 selected_file_bytes = 5 [default = -1];
+}
