@@ -300,15 +300,15 @@ test_parse :: () {
     p: ProtoFile;
     p = parse_proto_text(ProtoBasic1);
     test_eq(p.edition, "proto3");
-    test_eq(p.definitions == null, false);
+    test_eq(p.definitions.count, 1);
     if p.definitions {
         definition := p.definitions;
-        test_eq(definition.kind, .MESSAGE);
-        test_eq(definition.fields.count, 1);
-        test_eq(definition.fields[0].type_name, "int32");
-        test_eq(definition.fields[0].type, .INT32);
-        test_eq(definition.fields[0].name, "a");
-        test_eq(definition.fields[0].field_number, 1);
+        test_eq(definition[0].kind, .MESSAGE);
+        test_eq(definition[0].fields.count, 1);
+        test_eq(definition[0].fields[0].type_name, "int32");
+        test_eq(definition[0].fields[0].type, .INT32);
+        test_eq(definition[0].fields[0].name, "a");
+        test_eq(definition[0].fields[0].field_number, 1);
     }
 
     jai_code := generate_jai(p);
@@ -358,7 +358,7 @@ Point2D :: struct {
         */
         message Y { int32 y = 1; /* int32 z = 2; */ }
     END);
-    test_eq(p.definitions == null, false);
+    test_eq(p.definitions.count, 1);
     test_eq(p.definitions[0].name, "Y");
     test_eq(p.definitions[0].fields.count, 1);
     test_eq(p.definitions[0].fields[0].name, "y");
@@ -383,7 +383,7 @@ Point2D :: struct {
     test_eq(p.imports[0], "dir/other.proto");
     test_eq(p.imports[1], "dir/something.proto");
     test_eq(p.package, "testies.two");
-    test_eq(p.definitions == null, false);
+    test_eq(p.definitions.count, 1);
     test_eq(p.definitions[0].name, "Test");
     test_eq(p.definitions[0].fields.count, 2);
     test_eq(p.definitions[0].fields[0].name, "sicles");
@@ -405,13 +405,12 @@ Point2D :: struct {
             double time = 8;
         }
     END);
-    test_eq(p.definitions == null, false);
-    test_eq(p.definitions.name, "Body");
-    test_eq(p.definitions.fields.count, 2);
-    test_eq(p.definitions.fields[0].name, "x");
-    test_eq(p.definitions.fields[1].name, "time");
-    one_of := p.definitions.*.first_child;
-    test_eq(one_of == null, false);
+    test_eq(p.definitions.count, 1);
+    test_eq(p.definitions[0].name, "Body");
+    test_eq(p.definitions[0].fields.count, 2);
+    test_eq(p.definitions[0].fields[0].name, "x");
+    test_eq(p.definitions[0].fields[1].name, "time");
+    one_of := p.definitions[0].subdefs[0];
     test_eq(one_of.name, "Appendage");
     test_eq(one_of.fields.count, 3);
     test_eq(one_of.fields[0].name, "arms");
@@ -432,15 +431,15 @@ Point2D :: struct {
             E v = 2;
         }
     END);
-    test_eq(p.definitions.name, "M");
-    test_eq(p.definitions.fields.count, 2);
-    test_eq(p.definitions.fields[0].name, "x");
-    test_eq(p.definitions.fields[1].name, "v");
-    test_eq(p.definitions.first_child.name, "E");
-    test_eq(p.definitions.first_child.kind, .ENUM);
-    test_eq(p.definitions.first_child.fields.count, 2);
-    test_eq(p.definitions.first_child.fields[0].name, "v0");
-    test_eq(p.definitions.first_child.fields[1].name, "v1");
+    test_eq(p.definitions[0].name, "M");
+    test_eq(p.definitions[0].fields.count, 2);
+    test_eq(p.definitions[0].fields[0].name, "x");
+    test_eq(p.definitions[0].fields[1].name, "v");
+    test_eq(p.definitions[0].subdefs[0].name, "E");
+    test_eq(p.definitions[0].subdefs[0].kind, .ENUM);
+    test_eq(p.definitions[0].subdefs[0].fields.count, 2);
+    test_eq(p.definitions[0].subdefs[0].fields[0].name, "v0");
+    test_eq(p.definitions[0].subdefs[0].fields[1].name, "v1");
 }
 
 

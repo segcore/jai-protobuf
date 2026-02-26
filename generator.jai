@@ -9,7 +9,7 @@ ProtoFile :: struct {
     source_path: string; // Optional; file path to the original .proto file
     edition: string; // Edition or syntax version. Syntax "proto3" is edition "proto3".
     package: string; // Namespacing package, if found
-    definitions: *ProtoDefinition; // Definitions list, can use for expansion on this
+    definitions: [..]ProtoDefinition; // Top-level definitions
     options: [..]ProtoOption;
     imports: [..]string;
 }
@@ -26,19 +26,12 @@ ProtoFileTree :: struct {
     children: [..]ProtoFileTree;
 }
 
-// Has a for_expansion to loop over siblings
 ProtoDefinition :: struct {
     kind : ProtoDefinitionKind;
     name: string;
     fields : [..]ProtoField;
     options: [..]ProtoOption;
-
-    // Intrusive tree definition. Children are circular linked lists
-    // Avoiding [..]ProtoDefinition for pointer stability of parents
-    parent: *ProtoDefinition; // Definition which contains this. Null at the root.
-    first_child: *ProtoDefinition; // First child of this node in the tree
-    next_sibling: *ProtoDefinition; // Next sibling child in the tree
-    prev_sibling: *ProtoDefinition; // Previous sibling child in the tree
+    subdefs: [..]ProtoDefinition;
 }
 
 ProtoDefinitionKind :: enum {
@@ -94,7 +87,7 @@ parse_proto_text :: (data: string, source_path: string = "") -> ProtoFile, ok: b
     if !data {
         log("Parsing an empty protobuf text from %", logging_source_path, flags=.WARNING);
         ok = false;
-    } else if out.definitions == null {
+    } else if !out.definitions {
         log("No definitions found when parsing %", logging_source_path, flags=.WARNING);
     }
 
@@ -145,6 +138,12 @@ generate_jai :: (p: ProtoFile, protobuf_import := "") -> string {
 
     sb: String_Builder;
 
+    // Cache of small stack-based chain of parents and children
+    parent_path: [..]*ProtoDefinition;
+    parent_path.allocator = temp;
+    resolve_stack: [..]*ProtoDefinition;
+    resolve_stack.allocator = temp;
+
     print(*sb, "// !!! Automatically generated code !!!\n");
 
     if p.source_path  print(*sb, "// Generated from %\n", p.source_path);
@@ -162,10 +161,18 @@ generate_jai :: (p: ProtoFile, protobuf_import := "") -> string {
     for<packages if it print(*sb, "} // package namespace: %\n", it);
 
     print(*sb, "\n");
-    for p.definitions  generate_jai_proto_type(*sb, p.package, it);
+
+    resolve_stack.count = 0;
+    for* p.definitions {
+        array_add(*resolve_stack, it);
+        generate_jai_proto_type(*sb, p.package, *resolve_stack);
+        resolve_stack.count -= 1;
+    }
 
     print(*sb, "\n");
-    generate_jai_for_definitions(*sb, p.definitions, p);
+
+    resolve_stack.count = 0;
+    generate_jai_for_definitions(*sb, p.definitions, *parent_path, p, *resolve_stack);
 
     return builder_to_string(*sb);
 }
@@ -255,35 +262,24 @@ merge_proto_files :: (destination: *ProtoFile, source: ProtoFile) {
         destination.source_path = join(destination.source_path, source.source_path, separator=", ",, temp);
     else if source.source_path  destination.source_path = source.source_path;
     destination.package = source.package;
+    array_add(*destination.definitions, ..source.definitions);
     array_add(*destination.options, ..source.options);
     array_add(*destination.imports, ..source.imports);
-
-    if destination.definitions == null && source.definitions == null {
-        // nothing
-    } else if destination.definitions == null && source.definitions != null {
-        destination.definitions = source.definitions;
-    } else if destination.definitions != null && source.definitions == null {
-        // nothing
-    } else if destination.definitions != null && source.definitions != null {
-        // merge
-        dest_last := destination.definitions.prev_sibling;
-        source_last := source.definitions.prev_sibling;
-
-        dest_last.next_sibling = source.definitions;
-        source.definitions.prev_sibling = dest_last;
-        source_last.next_sibling = destination.definitions;
-        destination.definitions.prev_sibling = source_last;
-    }
 }
 
-generate_jai_proto_type :: (sb: *String_Builder, package: string, definiton: ProtoDefinition) {
-    if definiton.kind == {
+generate_jai_proto_type :: (sb: *String_Builder, package: string, definition_path: *[..]*ProtoDefinition) {
+    tail := last(definition_path.*);
+    if tail.kind == {
         case .MESSAGE; #through;
         case .ENUM;
-            id_name := build_path_up(package, definiton, "_");
-            print(sb, "ProtoType_% :: ProtoType.%;\n", id_name, definiton.kind);
+            id_name := build_path_up(package, definition_path.*, "_");
+            print(sb, "ProtoType_% :: ProtoType.%;\n", id_name, tail.kind);
     }
-    for definiton.first_child  generate_jai_proto_type(sb, package, it);
+    for* tail.subdefs {
+        array_add(definition_path, it);
+        generate_jai_proto_type(sb, package, definition_path);
+        definition_path.count -= 1;
+    }
 }
 
 // Mangles any name to avoid Jai keywords and builtins
@@ -363,14 +359,14 @@ mangle :: (proto_file: *ProtoFile) {
 
 generate_definition :: (sb: *String_Builder, definition: ProtoDefinition, package: string, indent_level := 0) {
     indent := indent_str(indent_level);
-    name := mangle(definition.name);
+    name := definition.name;
     if #complete definition.kind == {
         case .MESSAGE;
             print(sb, "%0% :: struct {", indent, name);
             if package  print(sb, " // %.%", package, name);
             print(sb, "\n", indent, name);
             for definition.fields       generate_jai_field(sb, it, indent_level + 1);
-            for definition.first_child  generate_definition(sb, it, package, indent_level + 1);
+            for definition.subdefs      generate_definition(sb, it, package, indent_level + 1);
             print(sb, "%}\n", indent);
         case .ENUM;
             print(sb, "%0% :: enum {\n", indent, name);
@@ -397,11 +393,14 @@ generate_definition :: (sb: *String_Builder, definition: ProtoDefinition, packag
 }
 
 
-generate_jai_for_definitions :: (sb: *String_Builder, set: *ProtoDefinition, proto_file: ProtoFile) {
-    for definition : set {
-        generate_jai_for_definitions(sb, definition.first_child, proto_file);
+generate_jai_for_definitions :: (sb: *String_Builder, set: []ProtoDefinition, definition_path: *[..]*ProtoDefinition, proto_file: ProtoFile, resolve_stack: *[..]*ProtoDefinition) {
+    for* definition : set {
+        array_add(definition_path, definition);
+        defer definition_path.count -= 1;
 
-        dotted_name := build_path_up(proto_file.package, definition, ".");
+        generate_jai_for_definitions(sb, definition.subdefs, definition_path, proto_file, resolve_stack);
+
+        dotted_name := build_path_up(proto_file.package, definition_path.*, ".");
 
         if #complete definition.kind == {
             case .MESSAGE;
@@ -415,7 +414,7 @@ generate_jai_for_definitions :: (sb: *String_Builder, set: *ProtoDefinition, pro
                     print(sb, "    ");
                     generate_jai_serialize_field(sb, field, field.repeated, field.required);
                 }
-                for < :one_ofs oneof : definition.first_child {
+                for < :one_ofs oneof : definition.subdefs {
                     print(sb, "    if message.%_kind == {\n", oneof.name);
                     for field : oneof.fields {
                         print(sb, "        case .%1; ", field.name);
@@ -442,8 +441,12 @@ generate_jai_for_definitions :: (sb: *String_Builder, set: *ProtoDefinition, pro
                 print(sb, "        case .VARINT;\n");
                 print(sb, "            ok=, decoded_value := decode_VARINT(*buf);  if !ok return false;\n");
                 print(*sbtmp, "            if field_number == {\n");
-                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, proto_file, definition, field, .VARINT, field.repeated);
-                for :one_ofs definition.first_child  for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, proto_file, it, field, .VARINT, false);
+                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, proto_file, definition_path.*, field, .VARINT, field.repeated, resolve_stack);
+                for* :one_ofs definition.subdefs {
+                    array_add(definition_path, it);
+                    for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, proto_file, definition_path.*, field, .VARINT, false, resolve_stack);
+                    definition_path.count -= 1;
+                }
                 print(*sbtmp, "            }\n");
                 if changed  append_and_steal_buffers(sb, *sbtmp);
                 reset(*sbtmp);
@@ -453,8 +456,12 @@ generate_jai_for_definitions :: (sb: *String_Builder, set: *ProtoDefinition, pro
                 print(sb, "            ok=, decoded_value := decode_I32(*buf);  if !ok return false;\n");
                 print(*sbtmp, "            decoded_value_float := (*decoded_value).(*float32).*;\n");
                 print(*sbtmp, "            if field_number == {\n");
-                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, proto_file, definition, field, .I32, field.repeated);
-                for :one_ofs definition.first_child  for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, proto_file, it, field, .I32, false);
+                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, proto_file, definition_path.*, field, .I32, field.repeated, resolve_stack);
+                for* :one_ofs definition.subdefs {
+                    array_add(definition_path, it);
+                    for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, proto_file, definition_path.*, field, .I32, false, resolve_stack);
+                    definition_path.count -= 1;
+                }
                 print(*sbtmp, "            }\n");
                 if changed  append_and_steal_buffers(sb, *sbtmp);
                 reset(*sbtmp);
@@ -464,8 +471,12 @@ generate_jai_for_definitions :: (sb: *String_Builder, set: *ProtoDefinition, pro
                 print(sb, "            ok=, decoded_value := decode_I64(*buf);  if !ok return false;\n");
                 print(*sbtmp, "            decoded_value_float := (*decoded_value).(*float64).*;\n");
                 print(*sbtmp, "            if field_number == {\n");
-                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, proto_file, definition, field, .I64, field.repeated);
-                for :one_ofs definition.first_child  for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, proto_file, it, field, .I64, false);
+                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, proto_file, definition_path.*, field, .I64, field.repeated, resolve_stack);
+                for* :one_ofs definition.subdefs {
+                    array_add(definition_path, it);
+                    for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, proto_file, definition_path.*, field, .I64, false, resolve_stack);
+                    definition_path.count -= 1;
+                }
                 print(*sbtmp, "            }\n");
                 if changed  append_and_steal_buffers(sb, *sbtmp);
                 reset(*sbtmp);
@@ -474,8 +485,12 @@ generate_jai_for_definitions :: (sb: *String_Builder, set: *ProtoDefinition, pro
                 print(sb, "        case .LEN;\n");
                 print(sb, "            ok=, _, submessage := decode_LEN(*buf);  if !ok return false;\n");
                 print(*sbtmp, "            if field_number == {\n");
-                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, proto_file, definition, field, .LEN, field.repeated);
-                for :one_ofs definition.first_child  for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, proto_file, it, field, .LEN, false);
+                for field : definition.fields  changed |= generate_jai_parse_field(*sbtmp, proto_file, definition_path.*, field, .LEN, field.repeated, resolve_stack);
+                for* :one_ofs definition.subdefs {
+                    array_add(definition_path, it);
+                    for field: it.fields  changed |= generate_jai_parse_field(*sbtmp, proto_file, definition_path.*, field, .LEN, false, resolve_stack);
+                    definition_path.count -= 1;
+                }
                 print(*sbtmp, "            }\n");
                 if changed  append_and_steal_buffers(sb, *sbtmp);
                 reset(*sbtmp);
@@ -647,7 +662,8 @@ generate_jai_serialize_value :: (sb: *String_Builder, type: ProtoType, field_num
     }
 }
 
-generate_jai_parse_field :: (sb: *String_Builder, proto_file: ProtoFile, definition: ProtoDefinition, field: ProtoField, wire_type: WireType, repeated: bool) -> bool {
+generate_jai_parse_field :: (sb: *String_Builder, proto_file: ProtoFile, definition_path: []*ProtoDefinition, field: ProtoField, wire_type: WireType, repeated: bool, resolve_stack: *[..]*ProtoDefinition) -> bool {
+    definition := last(definition_path);
     field_type := wire_type_for(field.type);
 
     known_type := true;
@@ -656,12 +672,14 @@ generate_jai_parse_field :: (sb: *String_Builder, proto_file: ProtoFile, definit
     // We have not detected the "real" types of subfields as Message vs Enum, and Message is assumed during parsing.
     // So we have some extra logic here to deal with it
     if field.type == .MESSAGE && !field.map {
-        type_definition := resolve_definition(proto_file, definition, field.type_name);
-        if type_definition {
-            if type_definition.kind == .ENUM {
+        resolve_stack.count = 0;
+        array_add(resolve_stack, ..definition_path);
+        if resolve_definition(proto_file, resolve_stack, field.type_name) {
+            tail := last(resolve_stack.*);
+            if tail.kind == .ENUM {
                 field_type = .VARINT;
             }
-            resolved_type_id = build_path_up(proto_file.package, type_definition, "_");
+            resolved_type_id = build_path_up(proto_file.package, resolve_stack.*, "_");
         } else {
             known_type = false;
         }
@@ -757,9 +775,10 @@ generate_jai_parse_field :: (sb: *String_Builder, proto_file: ProtoFile, definit
 
                             resolved_type_id := jai_type(value_proto, field.map_value);
                             if value_proto == .MESSAGE {
-                                value_type := resolve_definition(proto_file, definition, field.map_value);
-                                if value_type {
-                                    resolved_type_id = build_path_up(proto_file.package, value_type, ".");
+                                resolve_stack.count = 0;
+                                array_add(resolve_stack, ..definition_path);
+                                if resolve_definition(proto_file, resolve_stack, field.map_value) {
+                                    resolved_type_id = build_path_up(proto_file.package, resolve_stack.*, ".");
                                 }
                             }
 
@@ -807,39 +826,51 @@ generate_jai_parse_field :: (sb: *String_Builder, proto_file: ProtoFile, definit
 }
 
 
-resolve_definition :: (proto_file: ProtoFile, location: ProtoDefinition, type_name: string) -> *ProtoDefinition {
-    result: *ProtoDefinition = null;
+// Resolve a type_name to a ProtoDefinition. Result is put into `resolve_stack`. Fill it with the current parent_path before calling from outside!
+resolve_definition :: (proto_file: ProtoFile, resolve_stack: *[..]*ProtoDefinition, type_name: string) -> ok: bool {
+    // This uses the resolve_stack to recurse deeper while it finds a matching section of type_name
+    // which will always terminate somewhere.
+    // Then we reduce the resolve_stack size by 1 to go to the parent and resolve it there.
+    // Sounds a little dangerous for infinite recursion, but the type_name will always get smaller if
+    // going deeper, and on failures we always reduce stack size, so it will always terminate (resolved or unresolved)
+
+    search_root := resolve_stack.count == 0;
+
     // if type_name contains a . means that we need to descend into that subtype first
     left := find_index_from_left(type_name, ".");
     if left == 0 {
         // "." at the beginning, do not perform relative resolution
-        return null;
-    } else if left > 0 {
-        subfield := slice(type_name, 0, left);
-        right := slice(type_name, left + 1);
-        for sub : location.first_child {
-            if sub.name == subfield {
-                result = resolve_definition(proto_file, sub, right);
-                break;
+        search_root = true;
+    } else if resolve_stack.count > 0 {
+        tail := last(resolve_stack.*);
+        if left > 0 {
+            // Try and consume the thing to the left of the first "."
+            subfield := slice(type_name, 0, left);
+            right := slice(type_name, left + 1);
+            for* sub : tail.subdefs {
+                if sub.name == subfield {
+                    array_add(resolve_stack, sub);
+                    if resolve_definition(proto_file, resolve_stack, right)  return true;
+                    resolve_stack.count -= 1;
+                }
+            }
+        } else {
+            // Find exact subtype with this name
+            for* sub : tail.subdefs {
+                if sub.name == type_name {
+                    array_add(resolve_stack, sub);
+                    return true;
+                }
             }
         }
-    } else {
-        // Find exact subtype with this name
-        for* sub : location.first_child {
-            if sub.name == type_name {
-                result = sub;
-                break;
-            }
-        }
-    }
 
-    // No exact match, look higher up in the hierarchy for a matching name
-    if !result && location.parent {
-        result = resolve_definition(proto_file, location.parent, type_name);
+        // No exact match, look higher up in the hierarchy for a matching name
+        resolve_stack.count -= 1;
+        if resolve_definition(proto_file, resolve_stack, type_name)  return true;
     }
 
     // No match in a root element, lookup in the global namespace
-    if !result && !location.parent {
+    if search_root {
         for* definition : proto_file.definitions {
             root_name: string;
             type_name2 := type_name;
@@ -852,18 +883,21 @@ resolve_definition :: (proto_file: ProtoFile, location: ProtoDefinition, type_na
                 subfield := slice(type_name2, 0, left);
                 right := slice(type_name2, left + 1);
                 if definition.name == subfield {
-                    return resolve_definition(proto_file, definition, right);
+                    array_add(resolve_stack, definition);
+                    if resolve_definition(proto_file, resolve_stack, right)  return true;
+                    resolve_stack.count -= 1;
                 }
             } else {
                 if definition.name == type_name2 {
-                    result = definition;
-                    break;
+                    array_add(resolve_stack, definition);
+                    return true;
                 }
             }
         }
     }
 
-    return result;
+    // All successful cases early-return, so if we get here, we failed.
+    return false;
 }
 
 
@@ -874,26 +908,24 @@ id_name_for :: (name: string) -> string {
 }
 
 
-build_path_up :: (package: string, definition: ProtoDefinition, separator: string) -> string {
-    if !package && !definition.parent  return definition.name;
+build_path_up :: (package: string, definition_path: []*ProtoDefinition, separator: string) -> string {
+    if !package && definition_path.count == 1  return definition_path[0].name;
 
-    build :: (tmp: *String_Builder, definition: ProtoDefinition, separator: string) {
-        if definition.parent  build(tmp, definition.parent, separator);
-        if builder_string_length(tmp)  append(tmp, separator);
-        name := mangle(definition.name);
-        append(tmp, name);
-    }
-
-    tmp: String_Builder;
-    init_string_builder(*tmp,, temp);
-    for split(package, ".",, temp) {
-        if it {
-            if builder_string_length(*tmp)  append(*tmp, separator);
-            append(*tmp, it);
+    sb: String_Builder;
+    {
+        push_allocator(temp);
+        for split(package, ".") {
+            if it {
+                if builder_string_length(*sb)  append(*sb, separator);
+                append(*sb, it);
+            }
+        }
+        for definition_path {
+            if builder_string_length(*sb)  append(*sb, separator);
+            append(*sb, it.name);
         }
     }
-    build(*tmp, definition, separator);
-    return builder_to_string(*tmp);
+    return builder_to_string(*sb);
 }
 
 
@@ -903,45 +935,10 @@ indent_str :: (indent_level: int) -> string {
     return slice(SPACES, 0, length);
 }
 
-// For expansion, loops all siblings of this element
-for_expansion :: (first_sibling: *ProtoDefinition, body: Code, flags: For_Flags) #expand {
-    if first_sibling == null return;
-
-    child_index := 0;
-    #if (flags & .REVERSE) {
-        first := first_sibling.prev_sibling;
-    } else {
-        first := first_sibling;
-    }
-    iterator := first;
-    while true {
-        #if flags & .POINTER {
-            `it := iterator;
-        } else {
-            `it := iterator.*;
-        }
-        `it_index := child_index;
-
-        defer {
-            child_index += 1;
-            #if (flags & .REVERSE) {
-                iterator = iterator.prev_sibling;
-            } else {
-                iterator = iterator.next_sibling;
-            }
-
-            if iterator == first {
-                break;
-            }
-        }
-
-        #insert (remove=#assert(false)) body;
-    }
-}
 
 // For expansion picking only one_ofs. Usage: "for :one_ofs xxx"
-one_ofs :: (first_sibling: *ProtoDefinition, body: Code, flags: For_Flags) #expand {
-    for *=cast(bool, flags & .POINTER), <=cast(bool, flags & .REVERSE)  raw_it, raw_index : first_sibling {
+one_ofs :: (list: *[]ProtoDefinition, body: Code, flags: For_Flags) #expand {
+    for *=cast(bool, flags & .POINTER), <=cast(bool, flags & .REVERSE)  raw_it, raw_index : list.* {
         if raw_it.kind != .ONE_OF then continue;
 
         `it := raw_it;
@@ -990,10 +987,10 @@ parse_primary :: (p: *Parser, out: *ProtoFile) -> keep_going: bool {
             ok=, package := parse_package(p);
             out.package = package;
         case "message";
-            append_sibling(*out.definitions, parse_message(p, null));
+            ok = parse_message(p, null, *out.definitions);
             return true;
         case "enum";
-            append_sibling(*out.definitions, parse_enum(p, null));
+            ok = parse_enum(p, null, *out.definitions);
             return true;
         case "service";
             skip_service(p);
@@ -1031,21 +1028,6 @@ skip_extend :: (p: *Parser) {
             case .CCURLY; break;
             case; t = next(p);
         }
-    }
-}
-
-append_sibling :: (first_child: **ProtoDefinition, new_child: *ProtoDefinition) {
-    if new_child == null return;
-    if first_child.* == null {
-        first_child.* = new_child;
-        new_child.next_sibling = new_child;
-        new_child.prev_sibling = new_child;
-    } else {
-        old_last := first_child.*.prev_sibling;
-        old_last.next_sibling = new_child;
-        first_child.*.prev_sibling = new_child;
-        new_child.prev_sibling = old_last;
-        new_child.next_sibling = first_child.*;
     }
 }
 
@@ -1150,34 +1132,33 @@ parse_reserved :: (p: *Parser, definition: *ProtoDefinition) -> ok: bool {
 }
 
 
-parse_message :: (p: *Parser, parent: *ProtoDefinition) -> *ProtoDefinition {
+parse_message :: (p: *Parser, parent: *ProtoDefinition, inside_list: *[..]ProtoDefinition) -> ok: bool {
     ok, message_name := parse(p, .ID);
-    if !ok return null;
+    if !ok return false;
 
     ok = parse(p, .OCURLY);
-    if !ok return null;
+    if !ok return false;
 
-    definition: *ProtoDefinition = New(ProtoDefinition);
+    definition: ProtoDefinition;
     definition.kind = .MESSAGE;
     definition.name = message_name;
-    definition.parent = parent;
 
-    ok = parse_message_fields(p, definition);
-    return definition;
+    ok = parse_message_fields(p, *definition);
+    array_add(inside_list, definition);
+    return ok;
 }
 
 
-parse_enum :: (p: *Parser, parent: *ProtoDefinition) -> *ProtoDefinition {
+parse_enum :: (p: *Parser, parent: *ProtoDefinition, inside_list: *[..]ProtoDefinition) -> ok: bool {
     ok, message_name := parse(p, .ID);
-    if !ok return null;
+    if !ok return ok;
 
     ok = parse(p, .OCURLY);
-    if !ok return null;
+    if !ok return ok;
 
-    definition: *ProtoDefinition = New(ProtoDefinition);
+    definition: ProtoDefinition;
     definition.kind = .ENUM;
     definition.name = message_name;
-    definition.parent = parent;
 
     t: Token;
     while t.kind != .EOF {
@@ -1191,7 +1172,7 @@ parse_enum :: (p: *Parser, parent: *ProtoDefinition) -> *ProtoDefinition {
                 case "option";
                     while t.kind != .SEMICOLON && t.kind != .EOF { t = next(p); }
                 case;
-                    parse_field(p, definition);
+                    parse_field(p, *definition);
             }
         } else {
             log("Unknown item in enum: %", t);
@@ -1199,7 +1180,8 @@ parse_enum :: (p: *Parser, parent: *ProtoDefinition) -> *ProtoDefinition {
         }
     }
 
-    return definition;
+    array_add(inside_list, definition);
+    return ok;
 }
 
 parse_message_fields :: (p: *Parser, definition: *ProtoDefinition) -> ok: bool {
@@ -1214,9 +1196,9 @@ parse_message_fields :: (p: *Parser, definition: *ProtoDefinition) -> ok: bool {
         if t.kind == .ID {
             if t.text == {
             case "reserved"; parse_reserved(p, definition);
-            case "oneof";    next(p); append_sibling(*definition.first_child, parse_oneof(p, definition));
-            case "message";  next(p); append_sibling(*definition.first_child, parse_message(p, definition));
-            case "enum";     next(p); append_sibling(*definition.first_child, parse_enum(p, definition));
+            case "oneof";    next(p); parse_oneof(p, definition, *definition.subdefs);
+            case "message";  next(p); parse_message(p, definition, *definition.subdefs);
+            case "enum";     next(p); parse_enum(p, definition, *definition.subdefs);
             case "extensions"; #through;
             case "option";
                 while t.kind != .SEMICOLON && t.kind != .EOF { t = next(p); }
@@ -1231,22 +1213,22 @@ parse_message_fields :: (p: *Parser, definition: *ProtoDefinition) -> ok: bool {
     return true;
 }
 
-parse_oneof :: (p: *Parser, parent: *ProtoDefinition) -> *ProtoDefinition {
+parse_oneof :: (p: *Parser, parent: *ProtoDefinition, definition_list: *[..]ProtoDefinition) -> ok: bool {
     t: Token;
     ok, text := parse(p, .ID);
-    if !ok return null;
+    if !ok return false;
     name := text;
 
     ok, text = parse(p, .OCURLY);
-    if !ok return null;
+    if !ok return false;
 
-    item: *ProtoDefinition = New(ProtoDefinition);
+    item: ProtoDefinition;
     item.kind = .ONE_OF;
     item.name = name;
-    item.parent = parent;
 
-    ok = parse_message_fields(p, item);
-    return item;
+    ok = parse_message_fields(p, *item);
+    array_add(definition_list, item);
+    return ok;
 }
 
 parse_package :: (p: *Parser) -> ok: bool, package: string {
@@ -1508,6 +1490,10 @@ Token :: struct {
     kind: TokenKind;
     text: string;
     value: string;
+}
+
+last :: (array: []$T) -> T {
+    return array[array.count - 1];
 }
 
 #import "String";
