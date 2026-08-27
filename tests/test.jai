@@ -440,6 +440,22 @@ Point2D :: struct {
     test_eq(p.definitions[0].subdefs[0].fields[0].name, "v0");
     test_eq(p.definitions[0].subdefs[0].fields[1].name, "v1");
 
+    // Reserved enum values
+    p = parse_proto_text(#string END
+        enum E {
+            v0 = 0;
+            v1 = 1;
+            reserved 2;
+            v3 = 3;
+        }
+    END);
+    test_eq(p.definitions[0].name, "E");
+    test_eq(p.definitions[0].kind, .ENUM);
+    test_eq(p.definitions[0].fields.count, 3);
+    test_eq(p.definitions[0].fields[0].name, "v0");
+    test_eq(p.definitions[0].fields[1].name, "v1");
+    test_eq(p.definitions[0].fields[2].name, "v3");
+
     // Extension messages - declared.
     // I don't really care about the contents, but it should not screw up the rest of the parsing.
     // Adapted from example in the docs - "Extension Declarations"
