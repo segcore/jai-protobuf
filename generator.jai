@@ -1084,7 +1084,37 @@ parse_field_option :: (p: *Parser) -> ok:bool, option: ProtoOption {
     if !parse(p, .EQ) return false, option;
 
     t = next(p);
-    option.value = t.text;
+    if t.kind == {
+        case .ID; #through;
+        case .NUMBER; #through;
+        case .STRING;
+            // Great. Let it break
+            option.value = t.text;
+
+        case .OCURLY;
+            // Extension attribute
+            // Skip to matching closing curly
+            skip_to(p, .CCURLY);
+
+        // Haven't seen this before, but a best guess is to just skip to matching closer
+        case .OPAREN;
+            log("Unexpected token kind % in the value of an option, just skipping to matching end-token.", t.kind);
+            skip_to(p, .CPAREN);
+        case .OANGLE;
+            log("Unexpected token kind % in the value of an option, just skipping to matching end-token.", t.kind);
+            skip_to(p, .CANGLE);
+        case .OSQUARE;
+            log("Unexpected token kind % in the value of an option, just skipping to matching end-token.", t.kind);
+            skip_to(p, .CSQUARE);
+
+        case .CSQUARE; #through;
+        case .COMMA;
+            log("No option value provided. Found kind %", t.kind);
+            // But I guess that's the end of the option!
+            return true, option;
+        case;
+            log("Unexpected value kind '%' at the end of an option.", t.kind);
+    }
 
     t = next(p);
     if t.kind == .CSQUARE then return true, option;
@@ -1170,7 +1200,9 @@ parse_enum :: (p: *Parser, parent: *ProtoDefinition, inside_list: *[..]ProtoDefi
         if t.kind == .ID {
             if t.text == {
                 case "option";
-                    while t.kind != .SEMICOLON && t.kind != .EOF { t = next(p); }
+                    skip_to(p, .SEMICOLON);
+                case "reserved";
+                    skip_to(p, .SEMICOLON);
                 case;
                     parse_field(p, *definition);
             }

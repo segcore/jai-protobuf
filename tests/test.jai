@@ -86,7 +86,6 @@ test_encode :: () {
     index = buf.count;
     index = encode_VARINT(buf, index, 0, 16);
     test_eq(encode_finish(buf, index), u8.[0b1000_0000, 0b0000_0001, 0]);
-    
 }
 
 test_decode :: () {
@@ -440,6 +439,95 @@ Point2D :: struct {
     test_eq(p.definitions[0].subdefs[0].fields.count, 2);
     test_eq(p.definitions[0].subdefs[0].fields[0].name, "v0");
     test_eq(p.definitions[0].subdefs[0].fields[1].name, "v1");
+
+    // Extension messages - declared.
+    // I don't really care about the contents, but it should not screw up the rest of the parsing.
+    // Adapted from example in the docs - "Extension Declarations"
+    p = parse_proto_text(#string END
+        edition = "2023";
+        message Foo {
+            int32 field1 = 1;
+            extensions 4 to 1000 [
+                declaration = {
+                    number: 126,
+                    full_name: ".my.package.event_annotations",
+                    type: ".logs.proto.ValidationAnnotations",
+                    some_other_random_garbage_they_come_up_with_in_future: 4.0e5,
+                    reserved: true
+                }];
+            float32 field2 = 2;
+        }
+    END);
+    test_eq(p.definitions[0].name, "Foo");
+    test_eq(p.definitions[0].fields.count, 2);
+    test_eq(p.definitions[0].fields[0].name, "field1");
+    test_eq(p.definitions[0].fields[1].name, "field2");
+    test_eq(p.definitions[0].subdefs.count, 0);
+
+    // Extension messages - usage code. See notes above.
+    p = parse_proto_text(#string END
+        edition = "2023";
+        package vikings;
+
+        message LongBoat {
+            int32 field1 = 1;
+            extensions 4 to 1000 [
+                declaration = {
+                    number: 126,
+                    full_name: ".vikings.kitten_videos",
+                    type: ".vikings.dont_care.Video",
+                    some_other_random_garbage_they_come_up_with_in_future: 4.0e5,
+                    reserved: true
+                }];
+            float32 field2 = 2;
+        }
+
+        // Might usually be in another file.
+        message dont_care {
+            message Video {
+                string title = 1;
+            }
+        }
+
+        extend LongBoat {
+            repeated Video kitten_videos = 126;
+        }
+    END);
+    test_eq(p.package, "vikings");
+    test_eq(p.definitions.count, 2);
+    test_eq(p.definitions[0].name, "LongBoat");
+    test_eq(p.definitions[0].fields.count, 2);
+    test_eq(p.definitions[0].fields[0].name, "field1");
+    test_eq(p.definitions[0].fields[1].name, "field2");
+    test_eq(p.definitions[0].subdefs.count, 0);
+    test_eq(p.definitions[1].name, "dont_care");
+
+    // And features that protobuf.dev does not document, but Google uses in their protobuf files...
+    // Example from new /usr/include/google/protobuf/descriptor.proto
+    p = parse_proto_text(#string END
+        message FileOptions {
+            bool field1 = 1;
+            optional bool java_multiple_files = 10 [
+                default = false,
+                feature_support = {
+                    edition_introduced: EDITION_PROTO2
+                    edition_removed: EDITION_2024
+                    removal_error: "This behavior is enabled by default in editions 2024 and above. "
+                                   "To disable it, you can set `features.(pb.java).nest_in_file_class = YES` "
+                                   "on individual messages, enums, or services."
+
+                }
+            ];
+            bool last_field = 12;
+        }
+    END);
+    test_eq(p.definitions.count, 1);
+    test_eq(p.definitions[0].name, "FileOptions");
+    test_eq(p.definitions[0].fields.count, 3);
+    test_eq(p.definitions[0].fields[0].name, "field1");
+    test_eq(p.definitions[0].fields[1].name, "java_multiple_files");
+    test_eq(p.definitions[0].fields[2].name, "last_field");
+    test_eq(p.definitions[0].subdefs.count, 0);
 }
 
 
@@ -1019,6 +1107,8 @@ test_generate :: () {
         END));
         #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
         else {
+            #insert jai_code;
+            message: Abc;
             test_eq(jai_code == "", false);
         }
     }
