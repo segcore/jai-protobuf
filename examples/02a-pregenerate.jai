@@ -1,8 +1,11 @@
 /*
- * Example: Generate code only, to be consumed by another project.
+ * Example: Generate code only, to be consumed by another build target.
  * Avoids the cost of the code generation for each compile, but you
  * need to remember to regenerate it when the .proto files are modified.
  * Or have a fancier metaprogram do that for you.
+ *
+ * Usage: jai 02a-pregenerate.jai
+ * Runs at compile-time, does not need (nor generate) an executable.
  */
 
 /*
@@ -11,6 +14,17 @@
  */
 // #import "Protobuf";
 #import,dir "..";
+
+// We can just run the generator at compile time, since we have access to that in Jai.
+// This follows a similar pattern to the bindings generator.
+
+// It is optional. Just comment out this run block and you get a runtime executable version.
+// It might be easier to debug in that form.
+#run {
+    #import "Compiler";
+    set_build_options_dc(.{do_output = false});
+    main();
+}
 
 main :: () {
     protos :: string.[

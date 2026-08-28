@@ -1,11 +1,14 @@
 /*
  * Example: Use pre-generated code.
- * Must compile and run pregenerate.jai before this program for it to work.
+ * Must run the pre-generation code before this program, for it to work.
  *
- * First time and when protobuf schemas or pregenerate.jai are modified:
- *   jai 02a-pregenerate.jai; ./02a-pregenerate; jai 02b-use_generated.jai
+ * First time setup and when protobuf schemas or pregenerate.jai are modified:
+ *   jai 02a-pregenerate.jai;   // This generates the file we load here
+ *   jai 02b-use_generated.jai  // Actually build this
+ *   ./02b-use-generated
  * Subsequent:
  *   jai 02b-use_generated.jai
+ *   ./02b-use-generated
  */
 
 /*
@@ -25,7 +28,7 @@ main :: () {
 
     print("group1: %\n", group);
 
-    // Serialize to bytes. Allocates. Consider using ,,temp
+    // Serialize to bytes. Allocates. Consider setting allocators in real programs.
     bytes := Serialize(group);
     defer array_reset(*bytes);
     print("  Encoded as bytes: %\n", bytes);
@@ -34,10 +37,11 @@ main :: () {
 
     // Deserialize into structure
     decoded: Group;
-    ok := Deserialize(*decoded, bytes);
+    ok := Deserialize(*decoded, bytes); // May allocate (e.g. repeated elements)
     print("Deserialize Group from bytes: %\n", ifx ok "ok" else "failed");
 
     print("group2: %\n", decoded);
+    FreeContents(*decoded);
 }
 
 #import "Basic";

@@ -9,6 +9,8 @@
 // #import "Protobuf";
 #import,dir "..";
 
+// Base search directories for imported protobuf files
+// "" means the current working directory
 search_dirs :: string.["", "/usr/include"];
 
 // Insert the generated code.
@@ -52,7 +54,9 @@ generate_jai_wrapper :: (compile_files: ..string, search_dirs: []string = .[]) -
               bytes value = 2;
             }
         END;
-        code = join(code, generate_jai(parse_proto_text(missing_proto_contents)));
+        proto_file := parse_proto_text(missing_proto_contents);
+        mangle(*proto_file); // TODO: mangle should happen inside the library in this case too
+        code = join(code, generate_jai(proto_file));
     }
 
     return code;

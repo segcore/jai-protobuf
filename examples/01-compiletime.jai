@@ -25,7 +25,7 @@ main :: () {
 
     print("group1: %\n", group);
 
-    // Serialize to bytes. Allocates. Consider using ,,temp
+    // Serialize to bytes. Allocates. Consider using ,,temp or a Flat_Pool
     bytes := Serialize(group);
     defer array_reset(*bytes);
     print("  Encoded as bytes: %\n", bytes);
@@ -34,10 +34,11 @@ main :: () {
 
     // Deserialize into structure
     decoded: Group;
-    ok := Deserialize(*decoded, bytes);
+    ok := Deserialize(*decoded, bytes); // May allocate (e.g. repeated elements)
     print("Deserialize Group from bytes: %\n", ifx ok "ok" else "failed");
 
     print("group2: %\n", decoded);
+    FreeContents(*decoded);
 }
 
 #import "Basic";

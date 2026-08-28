@@ -23,6 +23,7 @@ main :: () {
     message.name = "Bob";
 
     { // 1. No dynamic allocations (stack-allocated, or global, or in an existing struct buffer, ...)
+        print("===== Stack buffer =====\n");
         stack_buffer: [1024]u8;
         buffer_index := Serialize(stack_buffer, stack_buffer.count, message);
         if buffer_index >= 0 {
@@ -36,6 +37,7 @@ main :: () {
     print("\n");
 
     { // 2. Temporary allocator, ONLY if the message is small and will definitely fit.
+        print("===== Temporary storage =====\n");
         bytes := Serialize(message,, temp);
         print("Temporary storage bytes: %\n", bytes);
     }
@@ -43,6 +45,7 @@ main :: () {
 
     { // 3. The Flat_Pool allocator can be reset to clear all memory at once
         // by setting the pointer back to the beginning, so it is very cheap to free data.
+        print("===== Flat pool =====\n");
         pool: Flat_Pool;
         pool_allocator: Allocator;
         pool_allocator.proc = flat_pool_allocator_proc;
@@ -94,6 +97,24 @@ main :: () {
             Deserialize(*reconstructed, buffer,, pool_allocator); // comma-comma
             reset(*pool);
         }
+    }
+
+    { // 4. Finally, if you really need it, the general purpose heap allocator
+        print("===== Default allocator =====\n");
+        bytes := Serialize(message);
+        defer array_reset(*bytes); // Remember to free!
+        print("Default allocator storage bytes: %\n", bytes);
+
+        // ...
+
+        received: Person;
+        Deserialize(*received, bytes);
+        // ... use it until finished
+
+        // The deserialized message must be freed (if it contains dynamic memory)
+        // In particular, if in the message's recursive expanded struct, contain any repeated elements ([..]arrays) or map<>.
+        FreeContents(*received);
+        // Trivial free procedures are still generated, but are empty and marked inline, so should be quite free.
     }
 }
 

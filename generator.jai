@@ -72,6 +72,10 @@ ProtoOption :: struct {
 
 INDENT :: 4;
 
+// -------------
+// This code has grown organically over some time. It needs cleanup.
+// -------------
+
 parse_proto_text :: (data: string, source_path: string = "") -> ProtoFile, ok: bool {
     out: ProtoFile;
     out.source_path = source_path;
@@ -121,7 +125,7 @@ generate_jai :: (set: *ProtoFileSet, protobuf_import := "") -> jai: string, fail
         code := generate_jai(node.merged_package, protobuf_import=protobuf_import);
         append(sb, code);
         // Loop backwards so the dependencies are a little more likely to come first...
-        // For when it is inserted at a non-top-level location
+        // For when the generated code is #inserted at a non-top-level location (where order matters)
         for< node.children generate_recursive(sb, it, protobuf_import);
     }
 

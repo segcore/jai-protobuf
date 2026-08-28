@@ -15,7 +15,7 @@ verbose :: false; // debugging this program
     compile("tests", "test.jai", run=true, quiet=false, dead_code_elimination=.NONE);
     compile("tests", "well-known.jai");
     compile("examples", "01-compiletime.jai", run=true);
-    compile("examples", "02a-pregenerate.jai", run=true);
+    compile("examples", "02a-pregenerate.jai", run=false);
     compile("examples", "02b-use_generated.jai", run=true);
     compile("examples", "03-imports.jai", run=true);
     compile("examples", "04-pool.jai", run=true);
