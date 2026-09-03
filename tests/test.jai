@@ -155,6 +155,45 @@ test_decode :: () {
         test_eq(ok, false);
     }
 
+    { // Test4 -- repeated field decoding
+        /*
+            message Test4 {
+                string d = 4;
+                repeated int32 e = 5;
+            }
+            4: {"hello"}
+            5: {1 2 3}
+        */
+        buf = .[0x22, 0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x2a, 0x03, 0x01, 0x02, 0x03];
+        ok, wire_type, field_number = decode_tag(*buf);
+        test_eq(ok, true);
+        test_eq(wire_type, .LEN);
+        test_eq(field_number, 4);
+
+        ok, len, submessage = decode_LEN(*buf);
+        test_eq(ok, true);
+        test_eq(len, 5);
+        test_eq(submessage.(string), "hello");
+
+        ok, wire_type, field_number = decode_tag(*buf);
+        test_eq(ok, true);
+        test_eq(wire_type, .LEN);
+        test_eq(field_number, 5);
+
+        ok, len, submessage = decode_LEN(*buf);
+        test_eq(ok, true);
+        test_eq(len, 3);
+        test_eq(submessage, u8.[1, 2, 3]);
+
+        ok, value: = decode_VARINT(*submessage);
+        test_eq(value, 1);
+        ok, value = decode_VARINT(*submessage);
+        test_eq(value, 2);
+        ok, value = decode_VARINT(*submessage);
+        test_eq(value, 3);
+        test_eq(submessage.count, 0);
+    }
+
     {
         encbuf: [100]u8;
         decbuf: [100]u8;
@@ -708,6 +747,41 @@ test_generate :: () {
             test_eq(decoded.Plant_kind, .twigs);
             test_eq(decoded.twigs, 1.0);
             FreeContents(*decoded);
+        }
+    }
+
+    { // Packed and unpacked repeated elements
+        jai_code :: #run generate_jai(parse_proto_text(#string END
+            message Test4 {
+                string d = 4;
+                repeated int32 e = 5;
+            }
+        END));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        else {
+            #insert jai_code;
+            message: Test4;
+
+            message.d = "hello";
+            array_add(*message.e, 1, 2, 3);
+            defer array_reset(*message.e);
+
+            bytes_unpacked :: u8.[0x22, 0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x28, 0x01, 0x28, 0x02, 0x28, 0x03];
+            bytes_packed   :: u8.[0x22, 0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x2a, 0x03, 0x01, 0x02, 0x03];
+
+            as_bytes := Serialize(message);
+            test_eq(as_bytes, bytes_unpacked); // Hopefully you're here because now we support packed encoding.
+            // test_eq(as_bytes, bytes_packed); // Should be this when we support packed encoding
+
+            decoded_from_packed: Test4;
+            Deserialize(*decoded_from_packed, bytes_packed);
+            test_eq(decoded_from_packed.d, "hello");
+            test_eq(decoded_from_packed.e.([]s32), s32.[1, 2, 3]);
+
+            decoded_from_unpacked: Test4;
+            Deserialize(*decoded_from_unpacked, bytes_unpacked);
+            test_eq(decoded_from_unpacked.d, "hello");
+            test_eq(decoded_from_unpacked.e.([]s32), s32.[1, 2, 3]);
         }
     }
 
