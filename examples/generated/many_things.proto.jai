@@ -107,7 +107,7 @@ Serialize :: (output: []u8, index: s64, message: ManyThings, field_number := -1,
     { it := message.something; if it != default.something     index = encode_string(output, index, it, 5); }
     { it := message.submessage; index = Serialize(output, index, it, 4); }
     { it := message.maybe_negative; if it != default.maybe_negative     index = encode_VARINT_zigzag(output, index, it, 3); }
-    for < message.values { index = encode_I32(output, index, it, 2); }
+    if message.values { req := 4*message.values.count; end := index; index -= req; if output && index >= 0 memcpy(*output[index], message.values.data, req); index = encode_LEN_from_index(output, index, end, 2); }
     { it := message.my_enum; index = Serialize(output, index, it, 1); }
     if message.Plant_kind == {
         case .tree; { it := message.tree; index = encode_VARINT(output, index, xx,no_check it, 10); }

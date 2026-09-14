@@ -606,9 +606,35 @@ generate_jai_free_function :: (sb: *String_Builder, definition: ProtoDefinition,
 }
 
 
+get_packing :: (field: ProtoField) -> pack: bool, known_size: int {
+    wire_type := wire_type_for(field.type);
+    pack := wire_type != .LEN && field.packed;
+    known_size := 0;
+    if wire_type == {
+        case .I32; known_size = 4;
+        case .I64; known_size = 8;
+    };
+    return pack, known_size;
+}
+
 generate_jai_serialize_field :: (sb: *String_Builder, field: ProtoField, repeated: bool = false, required: bool = false) {
+    pack, known_size := get_packing(field);
+
     if field.map {
         print(sb, "for message.% { ", field.name);
+    } else if repeated && pack && known_size {
+        // We can just memcpy it!
+        print(sb, "if message.%1 { req := %2*message.%1.count;", field.name, formatInt(known_size));
+        print(sb, " end := index; index -= req; if output && index >= 0 memcpy(*output[index], message.%.data, req);", field.name);
+        print(sb, " index = encode_LEN_from_index(output, index, end, %); }\n", formatInt(field.field_number));
+        return;
+    } else if repeated && pack {
+        // Encode as a LEN packed-encoding
+        // Encoded backwards so we put in the LEN afterwards
+        print(sb, "if message.%1 { end := index; for < message.%1 { ", field.name);
+        generate_jai_serialize_value(sb, field.type, -1, "it", "");
+        print(sb, " } index = encode_LEN_from_index(output, index, end, %); }\n", formatInt(field.field_number));
+        return;
     } else if repeated {
         print(sb, "for < message.% { ", field.name);
     } else {

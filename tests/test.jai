@@ -626,7 +626,12 @@ test_generate :: () {
             array_add(*points.x, 1, 2, 3);
             array_add(*points.y, 9, 8, 7);
             as_bytes := Serialize(points);
-            test_eq(as_bytes, u8.[0x08, 0x01, 0x08, 0x02, 0x08, 0x03, 0x10, 0x09, 0x10, 0x08, 0x10, 0x07]);
+            // unpacked
+            // test_eq(as_bytes, u8.[0x08, 0x01, 0x08, 0x02, 0x08, 0x03, 0x10, 0x09, 0x10, 0x08, 0x10, 0x07]);
+
+            // packed. LEN=2 | (field_number=1 or 2) << 3 = 0x02 + (0x08 or 0x10) -> 0x0A or 0x12
+            test_eq(as_bytes, u8.[0x0A, 3, 1, 2, 3, 0x12, 3, 9, 8, 7]);
+            //                          ^ length          ^ length
 
             decoded: Point2D;
             Deserialize(*decoded, as_bytes);
@@ -770,8 +775,8 @@ test_generate :: () {
             bytes_packed   :: u8.[0x22, 0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x2a, 0x03, 0x01, 0x02, 0x03];
 
             as_bytes := Serialize(message);
-            test_eq(as_bytes, bytes_unpacked); // Hopefully you're here because now we support packed encoding.
-            // test_eq(as_bytes, bytes_packed); // Should be this when we support packed encoding
+            // test_eq(as_bytes, bytes_unpacked);
+            test_eq(as_bytes, bytes_packed); // We now do packed encoding by default!
 
             decoded_from_packed: Test4;
             Deserialize(*decoded_from_packed, bytes_packed);
@@ -1286,12 +1291,12 @@ equal :: (a : $T, b : T) -> bool
 test_eq :: (a: $A, b: A, loc := #caller_location) {
     if !equal(a, b) {
         tests_failed += 1;
-        log_error("ERROR: %\n   % != \n   %", loc_string(loc), a, b);
+        log_error("%: Error: Not equal.\n   % != \n   %", loc_string(loc), a, b);
     }
 }
 
 loc_string :: (loc: Source_Code_Location) -> string {
-    return tprint("%:%:%", loc.fully_pathed_filename, formatInt(loc.line_number, base=10), formatInt(loc.character_number, base=10));
+    return tprint("%:%,%", loc.fully_pathed_filename, formatInt(loc.line_number, base=10), formatInt(loc.character_number, base=10));
 }
 
 tests_failed := 0;
