@@ -143,7 +143,7 @@ Deserialize :: (message: *ManyThings, bytes: []u8) -> ok: bool, used: s64 = 0 {
         case .LEN;
             ok=, _, submessage := decode_LEN(*buf);  if !ok return false;
             if field_number == {
-            case 2; while submessage {ok=, decoded_value := decode_I32_float(*submessage); if !ok return false; array_add(*message.values, decoded_value); }
+            case 2; if (submessage.count%4) != 0 return false; array_add(*message.values, ..[]float32.{submessage.count/4, xx submessage.data});
             case 4; if !Deserialize(*message.submessage, submessage)  return false;
             case 5; message.something = submessage.(string);
             case 7;  key: string; value: s32; while submessage {

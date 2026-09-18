@@ -6,6 +6,8 @@
 #load "decode.jai";
 #load "generator.jai";
 
+// Whether your system is little-endian. This flags the places which assume endianness
+// so you could go through and adjust all the necessary places (not implemented!).
 LITTLE_ENDIAN :: true;
 
 WireType :: enum {

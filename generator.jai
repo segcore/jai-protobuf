@@ -623,7 +623,8 @@ generate_jai_serialize_field :: (sb: *String_Builder, field: ProtoField, repeate
     if field.map {
         print(sb, "for message.% { ", field.name);
     } else if repeated && pack && known_size {
-        // We can just memcpy it!
+        // We can just memcpy it! Assuming little endian.
+        #assert LITTLE_ENDIAN;
         print(sb, "if message.%1 { req := %2*message.%1.count;", field.name, formatInt(known_size));
         print(sb, " end := index; index -= req; if output && index >= 0 memcpy(*output[index], message.%.data, req);", field.name);
         print(sb, " index = encode_LEN_from_index(output, index, end, %); }\n", formatInt(field.field_number));
@@ -839,16 +840,17 @@ generate_jai_parse_field :: (sb: *String_Builder, proto_file: ProtoFile, definit
                 print(sb, " array_add(*message.%, xx,no_check %); }\n", field.name, value_string);
                 changed = true;
             } else if repeated && field_type == .I32 {
-                print(sb, "            case %; while submessage {", formatInt(field.field_number));
-                if field.type == .FLOAT print(sb, "ok=, decoded_value := decode_I32_float(*submessage); if !ok return false;");
-                else                    print(sb, "ok=, decoded_value := decode_I32(*submessage); if !ok return false;");
-                print(sb, " array_add(*message.%, decoded_value); }\n", field.name);
+                // Fixed size elements which we can just memcpy, if we assume little-endian.
+                // Even if not, we can just reverse the byte order of the new elements after copying
+                // But who is on big endian systems anyway?
+                #assert LITTLE_ENDIAN;
+                print(sb, "            case %; if (submessage.count\%4) != 0 return false;", formatInt(field.field_number));
+                print(sb, " array_add(*message.%, ..[]%.{submessage.count/4, xx submessage.data});\n", field.name, jai_type(field.type, "s32"));
                 changed = true;
             } else if repeated && field_type == .I64 {
-                print(sb, "            case %; while submessage {", formatInt(field.field_number));
-                if field.type == .DOUBLE print(sb, "ok=, decoded_value := decode_I64_float(*submessage); if !ok return false;");
-                else                     print(sb, "ok=, decoded_value := decode_I64(*submessage); if !ok return false;");
-                print(sb, " array_add(*message.%, decoded_value); }\n", field.name);
+                #assert LITTLE_ENDIAN;
+                print(sb, "            case %; if (submessage.count\%8) != 0 return false;", formatInt(field.field_number));
+                print(sb, " array_add(*message.%, ..[]%.{submessage.count/8, xx submessage.data});\n", field.name, jai_type(field.type, "s32"));
                 changed = true;
             }
     }
