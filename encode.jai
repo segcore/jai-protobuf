@@ -52,10 +52,29 @@ encode_VARINT_nozigzag :: (buf: []u8, index: s64, value: s64, field_number: int 
     return encode_VARINT(buf, index, as_u64, field_number);
 }
 
-encode_VARINT :: (buf: []u8, index: s64, value: u64, field_number: int = -1) -> index: s64 {
-    most_significant_bit := bit_scan_reverse(value);
-    used := 1 + (most_significant_bit - 1) / 7;
+len_VARINT :: (value: u64) -> int {
+    #if true {
+        // This top path has shown encode_VARINT to be 25-40% faster.
+        if value < (1 << 7) return 1;
+        if value < (1 << 14) return 2;
+        if value < (1 << 21) return 3;
+        if value < (1 << 28) return 4;
+        if value < (1 << 35) return 5;
+        if value < (1 << 42) return 6;
+        if value < (1 << 49) return 7;
+        if value < (1 << 56) return 8;
+        if value < (1 << 63) return 9;
+        return 10;
+    } else {
+        #import "Bit_Operations";
+        most_significant_bit := bit_scan_reverse(value);
+        used := 1 + (most_significant_bit - 1) / 7;
+        return used;
+    }
+}
 
+encode_VARINT :: (buf: []u8, index: s64, value: u64, field_number: int = -1) -> index: s64 {
+    used := len_VARINT(value);
     index -= used;
     if index >= 0 {
         for i: 0..used-1 {
@@ -153,4 +172,3 @@ zigzag :: (n: s64) -> u64 {
 
 #import "Basic";
 #import "String";
-#import "Bit_Operations";
