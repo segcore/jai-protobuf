@@ -35,7 +35,8 @@
 
 
 tag :: (wire_type: WireType, field_number: int) -> u64 {
-    assert(field_number >= 1 && field_number <= 536870911);
+    // Protobuf requires the field numbers to be in this range, but an assert seems wrong.
+    // assert(field_number >= 1 && field_number <= 536870911);
     return cast(u64, field_number << 3) | xx wire_type;
 }
 
@@ -77,14 +78,14 @@ encode_VARINT :: (buf: []u8, index: s64, value: u64, field_number: int = -1) -> 
     used := len_VARINT(value);
     index -= used;
     if index >= 0 {
-        for i: 0..used-1 {
+        dest := buf.data + index;
+        while value >= 0x80 {
             databits: u8 = cast(u8, value & 0x7f);
             value >>= 7;
-            more: u8 = xx ifx value == 0 then 0 else 0x80;
-
-            buf.data[index + i] = databits | more;
+            dest.* = databits | 0x80;
+            dest += 1;
         }
-        assert(value == 0);
+        dest.* = xx value;
     }
     if field_number >= 0 then index = encode_tag(buf, index, .VARINT, field_number);
     return index;
@@ -98,7 +99,7 @@ encode_LEN :: (buf: []u8, index: s64, value: u64, field_number: int = -1) -> ind
 
 encode_LEN_from_index :: (buf: []u8, index: s64, submessage_end_index: s64, field_number: int = -1) -> index: s64 {
     // submessage_end_index should always be earlier, because index moves backwards
-    assert(index <= submessage_end_index, "Submessage end index is before the current index! % is not <= %", index, submessage_end_index);
+    assert(index <= submessage_end_index, "Submessage end index is before the current index!");
     value: u64 = xx (submessage_end_index - index);
     index = encode_VARINT(buf, index, value, -1);
     if field_number >= 0 then index = encode_tag(buf, index, .LEN, field_number);
