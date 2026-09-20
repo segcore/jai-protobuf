@@ -1,7 +1,7 @@
 /*
     Protobuf Decoding.
 
-    All values are encoded in forwards-order directly into the buffer.
+    All values are decoded in forwards-order directly from the buffer.
 
     Most of these are primitive functions, but see also decode_atom() and protobuf_atoms().
 
@@ -42,19 +42,19 @@ decode_VARINT :: (buf: *[]u8) -> ok: bool, value: u64 {
     need_more := true;
     index := 0;
     value : u64 = 0;
-    shift := 0;
     bufs := buf.*;
-    while need_more && index < buf.count {
+    while need_more {
+        if index >= buf.count  return false, 0;
+
         next_byte := bufs[index];
         need_more = cast(bool, next_byte & 0x80);
         databits: u64 = next_byte & 0x7F;
-        value = value + (databits << shift);
-        shift += 7;
-        if need_more && shift >= 64 {
-            log("Protobuf VARINT too big to be valid. More than 70 bits!", flags = Log_Flags.WARNING);
-            return false, value;
-        }
+        value = value + (databits << (7 * index));
         index += 1;
+    }
+    if index > 10 {
+        log("Protobuf VARINT too big to be valid. More than 70 bits!", flags = Log_Flags.WARNING);
+        return false, 0;
     }
     try_advance(buf, index);
     ok := !need_more;
@@ -210,7 +210,10 @@ unzigzag :: (value: u64) -> s64 {
 
 try_advance :: (buf: *[]u8, index: int) {
     if index >= buf.count then buf.* = .[];
-    else buf.* = array_view(buf.*, index);
+    else {
+        buf.data += index;
+        buf.count -= index;
+    }
 }
 
 #import "Math";
