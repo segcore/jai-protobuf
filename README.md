@@ -147,6 +147,49 @@ String types point directly into the protocol buffer byte array, avoiding
 unnecessary allocations -- but do take note that the **strings are only valid
 while the byte buffer is valid**.
 
+### Small implementation
+
+The implementation is small at ~1700 lines of code (most of which is the generator,
+which is only used at build time). It builds fast and
+[it runs fast](https://github.com/segcore/jai-protobuf-timings).
+
+This compares to 460,000 (~290k + ~170k) lines of code of the C++ Protobuf.
+
+This makes jai-protobuf 0.4% the size of C++ protobuf.
+
+The measurement process is described below, and excludes all test, generated,
+and example code.
+
+```sh
+# Measuring jai-protobuf
+cloc decode.jai encode.jai generator.jai module.jai
+# -------------------------------------------------------------------------------
+# Language                     files          blank        comment           code
+# -------------------------------------------------------------------------------
+# Jai                              4            261            161           1736
+
+# Measuring C++ Protobuf
+# Checked out from https://github.com/protocolbuffers/protobuf/tree/v36.1
+find src/google/protobuf/ \( ! -name "*.pb.*" -a ! -path "*test*" \) -exec cloc {} \+
+# -------------------------------------------------------------------------------
+# Language                     files          blank        comment           code
+# -------------------------------------------------------------------------------
+# C++                            367          27701          20448         208490
+# C/C++ Header                   291          13692          19216          81308
+# Total: 289798 lines of code
+
+# But the dependencies it brings in too
+cmake . -B build-debug -DCMAKE_BUILD_TYPE=Debug -Dprotobuf_FORCE_FETCH_DEPENDENCIES=On
+find build-debug/_deps/absl-src/absl/ ! -path "*test*" -exec cloc {} \+
+# -------------------------------------------------------------------------------
+# Language                     files          blank        comment           code
+# -------------------------------------------------------------------------------
+# C++                            447          20623          21338         122081
+# C/C++ Header                   357          10468          34047          46059
+# Total: 168140 lines of code
+# Toal sum: 289798+168140=457938
+```
+
 ### Proto text parser
 
 The parser is very relaxed. **It ignores anything it doesn't understand** and
