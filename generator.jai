@@ -990,11 +990,13 @@ parse_primary :: (p: *Parser, out: *ProtoFile) -> keep_going: bool {
         if t.kind == {
             case .EOF; return false;
             case .SEMICOLON; // allow trailing ; without complaining
-                t = next(p);
+                next(p); // consume it
+                t = peek(p);
             case;
                 // print the warning
                 parse(p, .ID);
-                t = next(p);
+                next(p);
+                t = peek(p);
         }
     }
     id = t.text;

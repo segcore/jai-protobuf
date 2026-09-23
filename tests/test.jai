@@ -8,6 +8,11 @@ SEARCH_DIRS :: string.[
     "/usr/include",
 ];
 
+// Print the generated code, instead of inserting it.
+// This allows this test to compile and run while there are compiler errors resulting
+// from inserting the bad codegen.
+PRINT_GENERATED_CODE :: 0;
+
 main :: () {
     context.print_style.default_format_int.base = 16;
     context.print_style.default_format_int.minimum_digits = 2;
@@ -18,6 +23,7 @@ main :: () {
     test_parse();
     test_generate();
     test_generate_from_file();
+    test_invalid_protofiles();
 
     if tests_failed exit(1);
     print("All tests passed!\n");
@@ -587,8 +593,6 @@ Point2D :: struct {
 
 
 test_generate :: () {
-    PRINT_GENERATED_CODE :: 0;
-
     {
         jai_code :: #run generate_jai(parse_proto_text(ProtoCorpus));
         #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
@@ -1194,17 +1198,18 @@ test_generate :: () {
             service SearchService {
                 rpc Search (SearchRequest) returns (SearchResponse);
             }
+            message M1 {}
             extend google.protobuf.EnumValueOptions {
                 optional string string_name = 123456789;
             }
-            message Abc {
-            }
+            message M2 {}
         END));
         #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
         else {
             #insert jai_code;
-            message: Abc;
-            test_eq(jai_code == "", false);
+            m1: M1;
+            m2: M2;
+            test_eq(jai_code != "", true);
         }
     }
 
@@ -1255,9 +1260,71 @@ test_generate_from_file :: () {
 
     resulting_code := generate_jai(parse_proto_file(input_path));
     ok := write_entire_file(output_path, resulting_code);
+    test_eq(resulting_code.count > 100, true);
     test_eq(ok, true);
     if ok print("Generated %\n", output_path);
     else  print("Failed to generate %\n", output_path);
+}
+
+
+test_invalid_protofiles :: () {
+
+    // For invalid protofiles, we expect some logs to show up.
+    // But that might make the good code look wrong, so they're adjusted here.
+    // Maybe we will just silence them later.
+    overwrite_logger :: (message: string, data: *void, info: Log_Info) {
+        runtime_support_default_logger(tprint("[TEST invalid files] -> %", message), data, info);
+    }
+
+    { // ignore extra semicolons at the root
+        jai_code :: #run generate_jai(parse_proto_text(#string END
+            syntax = "proto3";;
+            message M1 {};
+            message M2 {};;;
+            message M3 {};
+        END,, logger=overwrite_logger));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        else {
+            #insert jai_code;
+            message1: M1;
+            message2: M2;
+            message3: M3;
+            test_eq(jai_code != "", true);
+        }
+    }
+
+    { // ignore extra semicolons in messages
+        jai_code :: #run generate_jai(parse_proto_text(#string END
+            message M1 {
+                int32 a = 1;;
+                int32 b = 2;
+            };
+        END,, logger=overwrite_logger));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        else {
+            #insert jai_code;
+            m1: M1;
+            m1.a = 100;
+            m1.b = 200;
+            test_eq(jai_code != "", true);
+        }
+    }
+
+    { // ignore other strange things too
+        jai_code :: #run generate_jai(parse_proto_text(#string END
+            message M1 {}
+            ]
+            message M2 {}
+        END,, logger=overwrite_logger));
+        #if PRINT_GENERATED_CODE { print("%\n\n", jai_code); }
+        else {
+            #insert jai_code;
+            m1: M1;
+            m2: M2;
+            test_eq(jai_code != "", true);
+        }
+    }
+
 }
 
 
