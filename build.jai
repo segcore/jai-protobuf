@@ -18,7 +18,7 @@ verbose :: false; // debugging this program
     compile("examples", "02a-pregenerate.jai", run=false);
     compile("examples", "02b-use_generated.jai", run=true);
     compile("examples", "03-imports.jai", run=true);
-    compile("examples", "04-pool.jai", run=true);
+    compile("examples", "04-memory-allocation.jai", run=true);
     compile("tools", "protoc-jai.jai", args=.["protobuf-explorer-project.proto"]);
     compile("tools", "protobuf-explorer.jai");
 

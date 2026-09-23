@@ -1,10 +1,9 @@
 /*
- * Example: Using different memory allocation strategies, primarily focused
- * on the Flat_Pool (arena) allocator.
+ * Example: Using different memory allocation strategies.
  *
  * Usage:
- *   jai 04-pool.jai
- *   ./04-pool
+ *   jai 04-memory-allocation.jai
+ *   ./04-memory-allocation
  */
 
 // #import "Protobuf";
@@ -22,17 +21,44 @@ main :: () {
     message: Person;
     message.name = "Bob";
 
-    { // 1. No dynamic allocations (stack-allocated, or global, or in an existing struct buffer, ...)
+    { // 1. User-supplied buffer. Can be used without any dynamic allocations (stack-allocated, or global, or in an existing struct buffer, ...)
         print("===== Stack buffer =====\n");
         stack_buffer: [1024]u8;
-        buffer_index := Serialize(stack_buffer, stack_buffer.count, message);
-        if buffer_index >= 0 {
-            message_bytes := encode_finish(stack_buffer, buffer_index);
+        message_bytes, required_size := Serialize(message, stack_buffer);
+        if message_bytes {
             print("Succesfully encoded the message into a stack buffer. Used %/% bytes: %\n", message_bytes.count, stack_buffer.count, message_bytes);
         } else {
             // to see this message, you'll need to decrease the stack_buffer to 4 bytes or less.
-            print("Failed to encode the message into % bytes. It required % bytes.\n", stack_buffer.count, encode_calc_size(stack_buffer, buffer_index));
+            print("Failed to encode the message into % bytes. It required % bytes.\n", stack_buffer.count, required_size);
         }
+
+        // An example that might be seen in network traffic
+        // This is not "no dynamic allocation", but it is re-using the encode buffer for all encode calls
+        // This has the added benefit that when the buffer is large enough, it is all encoded
+        // in a single pass, so is the fastest encoding that you can get
+        MyNetworkSender :: struct {
+            socket: int;
+            encode_buffer: [..]u8;
+            receive_buffer: [..]u8;
+            encode_buffer_if_fixed_size_is_ok: [4096]u8;
+        }
+        network_send :: (socket: int, bytes: []u8) {
+            // pretend this is real
+            print("Sending on socket %: bytes %\n", socket, bytes);
+        }
+        send_serialized_protobuf_over_the_network :: (net: *MyNetworkSender, person: Person) {
+            message_bytes, required_size := Serialize(person, net.encode_buffer);
+            if !message_bytes {
+                // Exact required_size would be enough, but then each call might
+                // keep re-allocating e.g. 1 byte larger, which is slow.
+                array_resize(*net.encode_buffer, 2 * required_size, initialize=false);
+                message_bytes = Serialize(person, net.encode_buffer);
+            }
+            network_send(net.socket, message_bytes);
+        }
+        net: MyNetworkSender = .{ socket = 3 };
+        defer array_reset(*net.encode_buffer);
+        send_serialized_protobuf_over_the_network(*net, message);
     }
     print("\n");
 
@@ -43,8 +69,10 @@ main :: () {
     }
     print("\n");
 
-    { // 3. The Flat_Pool allocator can be reset to clear all memory at once
-        // by setting the pointer back to the beginning, so it is very cheap to free data.
+    {
+        // 3. The Flat_Pool allocator can be reset to clear all memory at once
+        // by setting the pointer back to the beginning, so it is very cheap to free data,
+        // and subsequent allocations will re-use the same memory region, so will be faster.
         print("===== Flat pool =====\n");
         pool: Flat_Pool;
         pool_allocator: Allocator;

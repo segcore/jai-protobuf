@@ -408,7 +408,7 @@ generate_jai_for_definitions :: (sb: *String_Builder, set: []ProtoDefinition, de
 
         if #complete definition.kind == {
             case .MESSAGE;
-                print(sb, "Serialize :: (output: []u8, index: s64, message: %, field_number := -1, force := false) -> index: s64 {\n", dotted_name);
+                print(sb, "Serialize :: (message: %, output: []u8, index: s64, field_number := -1, force := false) -> index: s64 {\n", dotted_name);
                 print(sb, "    default: %;\n", dotted_name);
                 print(sb, "    start_index := index;\n");
 
@@ -429,7 +429,8 @@ generate_jai_for_definitions :: (sb: *String_Builder, set: []ProtoDefinition, de
                 print(sb, "    if field_number >= 0 && (force || index != start_index)   index = encode_LEN_from_index(output, index, start_index, field_number);\n");
                 print(sb, "    return index;\n");
                 print(sb, "}\n");
-                print(sb, "Serialize :: (message: %) -> []u8 { buf := NewArray(-Serialize(u8.[], 0, message), u8, false); Serialize(buf, buf.count, message); return buf; }\n", dotted_name);
+                print(sb, "Serialize :: (message: %) -> []u8 { buf := NewArray(-Serialize(message, u8.[], 0), u8, false); Serialize(message, buf, buf.count); return buf; }\n", dotted_name);
+                print(sb, "Serialize :: (message: %, buf: []u8) -> []u8, required_size: int { index := Serialize(message, buf, buf.count); out, req := encode_finish(buf, index); return out, req; }\n", dotted_name);
 
                 sbtmp: String_Builder;
                 changed: bool;
@@ -505,7 +506,7 @@ generate_jai_for_definitions :: (sb: *String_Builder, set: []ProtoDefinition, de
                 print(sb, "    return true, bytes.count;\n");
                 print(sb, "}\n");
             case .ENUM;
-                print(sb, "Serialize :: (output: []u8, index: s64, enum_value: %, field_number := -1, force := false) -> index: s64 {\n", dotted_name);
+                print(sb, "Serialize :: (enum_value: %, output: []u8, index: s64, field_number := -1, force := false) -> index: s64 {\n", dotted_name);
                 print(sb, "    value := cast,no_check(u64, enum_value);\n");
                 print(sb, "    if force || value != 0  index = encode_VARINT(output, index, value, field_number);\n");
                 print(sb, "    return index;\n");
@@ -684,7 +685,7 @@ generate_jai_serialize_value :: (sb: *String_Builder, type: ProtoType, field_num
             print(sb, "index = encode_bytes(output, index, %, %);", id, formatInt(field_number));
         case .MESSAGE;
             force := ifx may_omit then "" else ", force=true";
-            print(sb, "index = Serialize(output, index, %, %0%0);", id, formatInt(field_number), force);
+            print(sb, "index = Serialize(%, output, index, %0%0);", id, formatInt(field_number), force);
         case;
             log("Unknown LEN field for %", type);
         }

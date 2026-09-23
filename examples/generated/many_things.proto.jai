@@ -41,7 +41,7 @@ ProtoType_SimpleHolder :: ProtoType.MESSAGE;
 ProtoType_ManyThings :: ProtoType.MESSAGE;
 ProtoType_ManyThings_SubType :: ProtoType.ENUM;
 
-Serialize :: (output: []u8, index: s64, enum_value: MyEnum, field_number := -1, force := false) -> index: s64 {
+Serialize :: (enum_value: MyEnum, output: []u8, index: s64, field_number := -1, force := false) -> index: s64 {
     value := cast,no_check(u64, enum_value);
     if force || value != 0  index = encode_VARINT(output, index, value, field_number);
     return index;
@@ -55,14 +55,15 @@ Deserialize :: (enum_value: *MyEnum, bytes: []u8) -> ok: bool, used: s64 {
     return true, used;
 }
 FreeContents :: inline (message: *MyEnum) {}
-Serialize :: (output: []u8, index: s64, message: SimpleHolder, field_number := -1, force := false) -> index: s64 {
+Serialize :: (message: SimpleHolder, output: []u8, index: s64, field_number := -1, force := false) -> index: s64 {
     default: SimpleHolder;
     start_index := index;
     { it := message.a; if it != default.a     index = encode_VARINT(output, index, xx,no_check it, 1); }
     if field_number >= 0 && (force || index != start_index)   index = encode_LEN_from_index(output, index, start_index, field_number);
     return index;
 }
-Serialize :: (message: SimpleHolder) -> []u8 { buf := NewArray(-Serialize(u8.[], 0, message), u8, false); Serialize(buf, buf.count, message); return buf; }
+Serialize :: (message: SimpleHolder) -> []u8 { buf := NewArray(-Serialize(message, u8.[], 0), u8, false); Serialize(message, buf, buf.count); return buf; }
+Serialize :: (message: SimpleHolder, buf: []u8) -> []u8, required_size: int { index := Serialize(message, buf, buf.count); out, req := encode_finish(buf, index); return out, req; }
 Deserialize :: (message: *SimpleHolder, bytes: []u8) -> ok: bool, used: s64 = 0 {
     buf := bytes;
     while buf {
@@ -85,7 +86,7 @@ Deserialize :: (message: *SimpleHolder, bytes: []u8) -> ok: bool, used: s64 = 0 
     return true, bytes.count;
 }
 FreeContents :: inline (message: *SimpleHolder) {}
-Serialize :: (output: []u8, index: s64, enum_value: ManyThings.SubType, field_number := -1, force := false) -> index: s64 {
+Serialize :: (enum_value: ManyThings.SubType, output: []u8, index: s64, field_number := -1, force := false) -> index: s64 {
     value := cast,no_check(u64, enum_value);
     if force || value != 0  index = encode_VARINT(output, index, value, field_number);
     return index;
@@ -99,16 +100,16 @@ Deserialize :: (enum_value: *ManyThings.SubType, bytes: []u8) -> ok: bool, used:
     return true, used;
 }
 FreeContents :: inline (message: *ManyThings.SubType) {}
-Serialize :: (output: []u8, index: s64, message: ManyThings, field_number := -1, force := false) -> index: s64 {
+Serialize :: (message: ManyThings, output: []u8, index: s64, field_number := -1, force := false) -> index: s64 {
     default: ManyThings;
     start_index := index;
     for message.name_mapping { end := index; index = encode_VARINT(output, index, xx,no_check it, 2); index = encode_string(output, index, it_index, 1); index = encode_LEN_from_index(output, index, end, 7); }
-    { it := message.subtype_value; index = Serialize(output, index, it, 6); }
+    { it := message.subtype_value; index = Serialize(it, output, index, 6); }
     { it := message.something; if it != default.something     index = encode_string(output, index, it, 5); }
-    { it := message.submessage; index = Serialize(output, index, it, 4); }
+    { it := message.submessage; index = Serialize(it, output, index, 4); }
     { it := message.maybe_negative; if it != default.maybe_negative     index = encode_VARINT_zigzag(output, index, it, 3); }
     if message.values { req := 4*message.values.count; end := index; index -= req; if output && index >= 0 memcpy(*output[index], message.values.data, req); index = encode_LEN_from_index(output, index, end, 2); }
-    { it := message.my_enum; index = Serialize(output, index, it, 1); }
+    { it := message.my_enum; index = Serialize(it, output, index, 1); }
     if message.Plant_kind == {
         case .tree; { it := message.tree; index = encode_VARINT(output, index, xx,no_check it, 10); }
         case .flowers; { it := message.flowers; index = encode_VARINT(output, index, xx,no_check it, 11); }
@@ -116,7 +117,8 @@ Serialize :: (output: []u8, index: s64, message: ManyThings, field_number := -1,
     if field_number >= 0 && (force || index != start_index)   index = encode_LEN_from_index(output, index, start_index, field_number);
     return index;
 }
-Serialize :: (message: ManyThings) -> []u8 { buf := NewArray(-Serialize(u8.[], 0, message), u8, false); Serialize(buf, buf.count, message); return buf; }
+Serialize :: (message: ManyThings) -> []u8 { buf := NewArray(-Serialize(message, u8.[], 0), u8, false); Serialize(message, buf, buf.count); return buf; }
+Serialize :: (message: ManyThings, buf: []u8) -> []u8, required_size: int { index := Serialize(message, buf, buf.count); out, req := encode_finish(buf, index); return out, req; }
 Deserialize :: (message: *ManyThings, bytes: []u8) -> ok: bool, used: s64 = 0 {
     buf := bytes;
     while buf {

@@ -25,7 +25,7 @@ main :: () {
 
     print("group1: %\n", group);
 
-    // Serialize to bytes. Allocates. Consider using ,,temp or a Flat_Pool
+    // Serialize to bytes. Allocates, but see example 04 for other strategies.
     bytes := Serialize(group);
     defer array_reset(*bytes);
     print("  Encoded as bytes: %\n", bytes);
