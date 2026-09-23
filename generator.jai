@@ -431,6 +431,7 @@ generate_jai_for_definitions :: (sb: *String_Builder, set: []ProtoDefinition, de
                 print(sb, "}\n");
                 print(sb, "Serialize :: (message: %) -> []u8 { buf := NewArray(-Serialize(message, u8.[], 0), u8, false); Serialize(message, buf, buf.count); return buf; }\n", dotted_name);
                 print(sb, "Serialize :: (message: %, buf: []u8) -> []u8, required_size: int { index := Serialize(message, buf, buf.count); out, req := encode_finish(buf, index); return out, req; }\n", dotted_name);
+                print(sb, "Serialize :: (output: []u8, index: int, message: %) -> index: int #deprecated { return Serialize(message, output, index); }\n", dotted_name);
 
                 sbtmp: String_Builder;
                 changed: bool;
