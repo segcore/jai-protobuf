@@ -63,7 +63,9 @@ decode_VARINT :: (buf: *[]u8) -> ok: bool, value: u64 {
 
 decode_LEN :: (buf: *[]u8) -> ok: bool, length: s64, submessage: []u8 {
     ok, value := decode_VARINT(buf);
-    len := cast(s64) value;
+    // Regarding 'no_check' and len >= 0 - we do not want to assert failure from external input
+    len := cast,no_check(s64) value;
+    ok = ok && len >= 0;
     submessage: []u8;
     if ok {
         submessage = array_view(buf.*, 0, len);

@@ -1,6 +1,9 @@
 /*
     Protobuf Encoding.
 
+    This file contains the primitive encoding functions. Typically this will be used by
+    generated code, so you won't usually call these yourself.
+
     All values are encoded 'backwards' -- from the last byte of the buffer until the first.
     This is required because Protobuf used TLV (Type, Length, Value), and to know the length
     we must first know how many bytes are needed to encode the value. While we're there, we
@@ -27,16 +30,20 @@
         index = encode_LEN_from_index(buf, index, submessage_end, 1);
 
         size := encode_calc_size(buf, index); // 9 bytes
-        message_bytes := encode_finish(buf, index); // []u8 of the final message
+        message_bytes, required_size := encode_finish(buf, index); // []u8 of the final message
         if message_bytes {
             // send message_bytes over a socket, ...
+        } else {
+            // The buffer needed to be <required_size> large to work
+            // e.g. can be used to allocate enough space and then re-encode the result
         }
  */
 
 
 tag :: (wire_type: WireType, field_number: int) -> u64 {
-    // Protobuf requires the field numbers to be in this range, but an assert seems wrong.
-    // assert(field_number >= 1 && field_number <= 536870911);
+    // Protobuf requires the field numbers to be in a certain range.
+    // If anything, we should check and warn about this in the generator, not here.
+    // assert(field_number_is_valid(field_number);
     return cast(u64, field_number << 3) | xx wire_type;
 }
 
@@ -55,7 +62,7 @@ encode_VARINT_nozigzag :: (buf: []u8, index: s64, value: s64, field_number: int 
 
 len_VARINT :: (value: u64) -> int {
     #if true {
-        // This top path has shown encode_VARINT to be 25-40% faster.
+        // This top path has shown encode_VARINT to take 25-40% less time.
         if value < (1 << 7) return 1;
         if value < (1 << 14) return 2;
         if value < (1 << 21) return 3;
@@ -156,13 +163,17 @@ encode_bytes :: (buf: []u8, index: s64, value: []u8, field_number := -1) -> size
     return index;
 }
 
+// Return the amount of space required to encode the current message.
 encode_calc_size :: (buf: []u8, index: s64) -> s64 {
     return buf.count - index;
 }
 
-encode_finish :: (buf: []u8, index: s64) -> []u8 {
-    if index < 0 then return .[];
-    return array_view(buf, index);
+// Returns the finalized encoded bytes view on success (otherwise empty), and:
+// the number of bytes required (only useful if the space was insufficient)
+encode_finish :: (buf: []u8, index: s64) -> result: []u8, required: s64 {
+    required_size := encode_calc_size(buf, index);
+    if index < 0 then return .[], required_size;
+    return array_view(buf, index), required_size;
 }
 
 zigzag :: (n: s64) -> u64 {

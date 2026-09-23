@@ -19,7 +19,7 @@ verbose :: false; // debugging this program
     compile("examples", "02b-use_generated.jai", run=true);
     compile("examples", "03-imports.jai", run=true);
     compile("examples", "04-pool.jai", run=true);
-    compile("tools", "proto-to-jai.jai", args=.["protobuf-explorer-project.proto"]);
+    compile("tools", "protoc-jai.jai", args=.["protobuf-explorer-project.proto"]);
     compile("tools", "protobuf-explorer.jai");
 
     // If we get to the end, then everything worked

@@ -9,7 +9,7 @@ SUPPORT_STDIN :: OS != .WINDOWS;
 
 usage :: () {
     print("Converts protobuf message descriptions to Jai source code.\n\n");
-    print("Usage: % [options] [-f] files...\n", ifx program_name else "proto-to-jai");
+    print("Usage: % [options] [-f] files...\n", ifx program_name else "protoc-jai");
     print("options:\n");
     print("     -h | -help         Print this usage information\n");
     print("     -I {search_dir}    Add search directory. Can be used more than once.\n");

@@ -187,3 +187,9 @@ array_view_equal :: (a: []u8, b: []u8) -> bool {
     equal := memcmp(a.data, b.data, a.count) == 0;
     return equal;
 }
+
+// Check if the protobuf tag field number is in the range that Protobuf specifies.
+// This library doesn't care - it will work with other numbers too :D
+field_number_is_valid :: (field_number: int) -> bool {
+    return (field_number >= 1 && field_number <= 536870911);
+}
