@@ -64,6 +64,7 @@ Serialize :: (message: SimpleHolder, output: []u8, index: s64, field_number := -
 }
 Serialize :: (message: SimpleHolder) -> []u8 { buf := NewArray(-Serialize(message, u8.[], 0), u8, false); Serialize(message, buf, buf.count); return buf; }
 Serialize :: (message: SimpleHolder, buf: []u8) -> []u8, required_size: int { index := Serialize(message, buf, buf.count); out, req := encode_finish(buf, index); return out, req; }
+Serialize :: (output: []u8, index: int, message: SimpleHolder) -> index: int #deprecated { return Serialize(message, output, index); }
 Deserialize :: (message: *SimpleHolder, bytes: []u8) -> ok: bool, used: s64 = 0 {
     buf := bytes;
     while buf {
@@ -119,6 +120,7 @@ Serialize :: (message: ManyThings, output: []u8, index: s64, field_number := -1,
 }
 Serialize :: (message: ManyThings) -> []u8 { buf := NewArray(-Serialize(message, u8.[], 0), u8, false); Serialize(message, buf, buf.count); return buf; }
 Serialize :: (message: ManyThings, buf: []u8) -> []u8, required_size: int { index := Serialize(message, buf, buf.count); out, req := encode_finish(buf, index); return out, req; }
+Serialize :: (output: []u8, index: int, message: ManyThings) -> index: int #deprecated { return Serialize(message, output, index); }
 Deserialize :: (message: *ManyThings, bytes: []u8) -> ok: bool, used: s64 = 0 {
     buf := bytes;
     while buf {
